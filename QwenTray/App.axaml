@@ -1,0 +1,27 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="QwenTray.App"
+             RequestedThemeVariant="Default">
+  <Application.Styles>
+    <FluentTheme />
+  </Application.Styles>
+  <TrayIcon.Icons>
+    <TrayIcons>
+      <TrayIcon Icon="/Assets/status-stopped.png" ToolTipText="QwenTray: stopped">
+        <TrayIcon.Menu>
+          <NativeMenu>
+            <NativeMenuItem Header="Start" ToggleType="CheckBox" IsChecked="False" Click="OnStart" />
+            <NativeMenuItem Header="Stop" ToggleType="CheckBox" IsChecked="False" Click="OnStop" />
+            <NativeMenuItem Header="Restart" ToggleType="CheckBox" IsChecked="False" Click="OnRestart" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Open Web Shell" ToggleType="CheckBox" IsChecked="False" Click="OnOpenWeb" />
+            <NativeMenuItem Header="Open daemon log" ToggleType="CheckBox" IsChecked="False" Click="OnOpenLog" />
+            <NativeMenuItemSeparator />
+            <NativeMenuItem Header="Start with Windows" ToggleType="CheckBox" Click="OnAutostart" />
+            <NativeMenuItem Header="Quit" ToggleType="CheckBox" IsChecked="False" Click="OnQuit" />
+          </NativeMenu>
+        </TrayIcon.Menu>
+      </TrayIcon>
+    </TrayIcons>
+  </TrayIcon.Icons>
+</Application>

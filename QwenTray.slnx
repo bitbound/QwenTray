@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="QwenTray/QwenTray.csproj" />
+  <Project Path="tests/QwenTray.Tests/QwenTray.Tests.csproj" />
+</Solution>

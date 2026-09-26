@@ -1,0 +1,28 @@
+namespace QwenTray;
+
+public enum DaemonState
+{
+    Stopped,
+    Starting,
+    Running,
+    Crashed
+}
+
+public sealed class DaemonStateMachine
+{
+    public DaemonState State { get; private set; } = DaemonState.Stopped;
+    public int ConsecutiveFailures { get; private set; }
+
+    public void BeginStart() => State = DaemonState.Starting;
+    public void Adopt() { State = DaemonState.Running; ConsecutiveFailures = 0; }
+    public void HealthSucceeded() { State = DaemonState.Running; ConsecutiveFailures = 0; }
+    public void HealthFailed() { if (State is DaemonState.Starting or DaemonState.Running) State = DaemonState.Starting; }
+    public void UnexpectedExit() { State = DaemonState.Crashed; ConsecutiveFailures++; }
+    public void UserStopped() { State = DaemonState.Stopped; ConsecutiveFailures = 0; }
+
+    public int BackoffSeconds(int maximum)
+    {
+        var exponent = Math.Clamp(ConsecutiveFailures - 1, 0, 30);
+        return Math.Min(maximum, (int)Math.Min(maximum, Math.Pow(2, exponent)));
+    }
+}
