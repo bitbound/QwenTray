@@ -40,7 +40,8 @@ internal static class Program
         finally
         {
             App.Services = null;
-            _services?.Dispose();
+            // DaemonSupervisor is IAsyncDisposable-only, so the container must be disposed asynchronously.
+            _services?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _mutex.ReleaseMutex();
             _mutex.Dispose();
         }
