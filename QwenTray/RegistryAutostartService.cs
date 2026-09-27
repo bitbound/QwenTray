@@ -7,6 +7,8 @@ public sealed class RegistryAutostartService
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "QwenTray";
 
+    public event EventHandler? Changed;
+
     public bool IsEnabled()
     {
         var executable = Environment.ProcessPath;
@@ -28,6 +30,8 @@ public sealed class RegistryAutostartService
         {
             key.DeleteValue(ValueName, throwOnMissingValue: false);
         }
+
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private static string Quote(string path) => $"\"{path}\"";

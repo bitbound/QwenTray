@@ -35,6 +35,12 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     public DaemonState State => _machine.State;
     public string? LogPath => _logPath;
+
+    /// <summary>
+    /// The supervised daemon's process id, whether it is our child or a listener we adopted.
+    /// </summary>
+    public int? DaemonProcessId => _process is { HasExited: false } process ? process.Id : _adoptedPid;
+
     public event EventHandler<DaemonState>? StateChanged;
 
     public async Task StartAsync()
@@ -159,8 +165,8 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         PublishState();
         var executable = _settings.QwenExecutable;
         var workspace = ResolveWorkspace();
-        var arguments = new List<string> { "serve", "--hostname", _settings.Host, "--port", _settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture) };
-        arguments.AddRange(_settings.ExtraArgs);
+        foreach (var warning in ValidateSettings(_settings)) _logger.LogWarning("Daemon settings warning: {Warning}", warning);
+        var arguments = BuildArguments(_settings);
         var command = $"\"{executable}\" " + string.Join(" ", arguments.Select(QuoteArgument));
         var start = new ProcessStartInfo
         {
@@ -195,15 +201,49 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             _process.Start();
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
-            _logger.LogInformation("Spawned daemon via cmd.exe. Pid={Pid} Workspace={Workspace} Command={Command}", _process.Id, start.WorkingDirectory ?? "(default)", start.Arguments);
+            _logger.LogInformation("Spawned daemon via cmd.exe. Pid={Pid} Workspace={Workspace} BearerAuth={BearerAuth} ArgCount={ArgCount}", _process.Id, start.WorkingDirectory ?? "(default)", _settings.UsesBearerAuth, arguments.Count);
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to spawn daemon. Command={Command}", start.Arguments);
+            _logger.LogError(exception, "Failed to spawn daemon.");
             _machine.UnexpectedExit();
             PublishState();
             throw;
         }
+    }
+
+    internal static List<string> BuildArguments(Settings settings)
+    {
+        var args = new List<string> { "serve", "--hostname", settings.Host, "--port", settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        if (!string.IsNullOrWhiteSpace(settings.Token)) { args.Add("--token"); args.Add(settings.Token.Trim()); }
+        if (settings.RequireAuth) args.Add("--require-auth");
+        if (settings.EnableSessionShell) args.Add("--enable-session-shell");
+        if (!settings.ServeWeb) args.Add("--no-web");
+        if (settings.LocalControl) args.Add("--local-control");
+        foreach (var origin in settings.AllowedOrigins.Where(origin => !string.IsNullOrWhiteSpace(origin)))
+        {
+            args.Add("--allow-origin");
+            args.Add(origin.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(settings.TlsCertPath)) { args.Add("--tls-cert"); args.Add(settings.TlsCertPath.Trim()); }
+        if (!string.IsNullOrWhiteSpace(settings.TlsKeyPath)) { args.Add("--tls-key"); args.Add(settings.TlsKeyPath.Trim()); }
+        if (settings.MaxSessions != 32) { args.Add("--max-sessions"); args.Add(settings.MaxSessions.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        if (settings.MaxConnections != 256) { args.Add("--max-connections"); args.Add(settings.MaxConnections.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        if (settings.EventRingSize != 8000) { args.Add("--event-ring-size"); args.Add(settings.EventRingSize.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        if (settings.RateLimit) args.Add("--rate-limit");
+        if (settings.DebugMode) args.Add("--debug");
+        args.AddRange(settings.ExtraArgs.Where(extra => !string.IsNullOrWhiteSpace(extra)));
+        return args;
+    }
+
+    internal static IEnumerable<string> ValidateSettings(Settings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.Host)) yield return "Hostname is empty; the daemon refuses to start.";
+        if (settings.RequireAuth && string.IsNullOrWhiteSpace(settings.Token)) yield return "Require auth is set without a token; the daemon only fails fast on a loopback bind.";
+        var hasCert = !string.IsNullOrWhiteSpace(settings.TlsCertPath);
+        var hasKey = !string.IsNullOrWhiteSpace(settings.TlsKeyPath);
+        if (hasCert != hasKey) yield return "--tls-cert and --tls-key must both be set or both empty.";
+        if (!settings.RateLimit && (settings.ExtraArgs.Any(a => a.StartsWith("--rate-limit-", StringComparison.Ordinal)))) yield return "rate-limit tier flags are present without rate limiting enabled.";
     }
 
     private void HandleUnexpectedExit()
@@ -269,7 +309,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     {
         try
         {
-            using var response = await _http.GetAsync(_settings.HealthUri, _shutdown.Token);
+            using var request = new HttpRequestMessage(HttpMethod.Get, _settings.HealthUri);
+            if (_settings.UsesBearerAuth && !string.IsNullOrWhiteSpace(_settings.Token))
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.Token.Trim());
+            using var response = await _http.SendAsync(request, _shutdown.Token);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException) { return false; }

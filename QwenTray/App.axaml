@@ -1,21 +1,46 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:QwenTray"
              x:Class="QwenTray.App"
              RequestedThemeVariant="Default">
+
+  <Application.DataTemplates>
+    <local:ViewLocator />
+  </Application.DataTemplates>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="/Resources/Theme.axaml" />
+        <ResourceInclude Source="/Resources/Icons.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
   <Application.Styles>
-    <FluentTheme />
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Dark" Accent="#2196F3" RegionColor="#121212" />
+        <ColorPaletteResources x:Key="Light" Accent="#2196F3" RegionColor="#FAFAFA" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="/Resources/Styles.axaml" />
   </Application.Styles>
+
   <TrayIcon.Icons>
     <TrayIcons>
-      <TrayIcon Icon="/Assets/status-stopped.png" ToolTipText="QwenTray: stopped">
+      <TrayIcon Icon="/Assets/status-stopped.png" ToolTipText="QwenTray: stopped" Clicked="OnTrayIconClicked">
         <TrayIcon.Menu>
           <NativeMenu>
+            <NativeMenuItem Header="Show QwenTray" ToggleType="CheckBox" IsChecked="False" Click="OnShowWindow" />
+            <NativeMenuItemSeparator />
             <NativeMenuItem Header="Start" ToggleType="CheckBox" IsChecked="False" Click="OnStart" />
             <NativeMenuItem Header="Stop" ToggleType="CheckBox" IsChecked="False" Click="OnStop" />
             <NativeMenuItem Header="Restart" ToggleType="CheckBox" IsChecked="False" Click="OnRestart" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="Open Web Shell" ToggleType="CheckBox" IsChecked="False" Click="OnOpenWeb" />
             <NativeMenuItem Header="Open daemon log" ToggleType="CheckBox" IsChecked="False" Click="OnOpenLog" />
+            <NativeMenuItem Header="Settings..." ToggleType="CheckBox" IsChecked="False" Click="OnOpenSettings" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="Start with Windows" ToggleType="CheckBox" Click="OnAutostart" />
             <NativeMenuItem Header="Quit" ToggleType="CheckBox" IsChecked="False" Click="OnQuit" />

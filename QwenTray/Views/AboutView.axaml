@@ -1,0 +1,73 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:QwenTray.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="700" d:DesignHeight="700"
+             x:Class="QwenTray.Views.AboutView"
+             x:DataType="vm:AboutViewModel">
+
+  <ScrollViewer Margin="20">
+    <StackPanel Spacing="16" MaxWidth="720" HorizontalAlignment="Left">
+
+      <TextBlock Classes="h1" Text="About QwenTray" />
+
+      <Border Classes="Card">
+        <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+          <TextBlock Text="Version:" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock Grid.Row="0" Grid.Column="1"
+                     Text="{Binding AppVersion}"
+                     Padding="8,0,0,0"
+                     VerticalAlignment="Center" />
+
+          <TextBlock Grid.Row="1" FontWeight="SemiBold" Margin="0,8,0,0" Text="Project:" />
+          <HyperlinkButton Grid.Row="1" Grid.Column="1"
+                           Classes="Small"
+                           Margin="0,8,0,0"
+                           Content="{Binding ProjectUrl}"
+                           Command="{Binding OpenUrlCommand}"
+                           CommandParameter="{Binding ProjectUrl}" />
+
+          <TextBlock Grid.Row="2" FontWeight="SemiBold" Margin="0,8,0,0" Text="Issues:" />
+          <HyperlinkButton Grid.Row="2" Grid.Column="1"
+                           Classes="Small"
+                           Margin="0,8,0,0"
+                           Content="Report a bug or request a feature"
+                           Command="{Binding OpenUrlCommand}"
+                           CommandParameter="{Binding IssuesUrl}" />
+        </Grid>
+      </Border>
+
+      <Border Classes="Card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="h2" Text="Open-source libraries" />
+
+          <ItemsControl ItemsSource="{Binding Libraries}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:LibraryLink">
+                <Grid ColumnDefinitions="220,Auto,*" Margin="0,4">
+                  <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                  <HyperlinkButton Grid.Column="1"
+                                   Classes="Small"
+                                   Content="Source"
+                                   Command="{Binding $parent[ItemsControl].((vm:AboutViewModel)DataContext).OpenUrlCommand}"
+                                   CommandParameter="{Binding SourceUrl}" />
+                  <HyperlinkButton Grid.Column="2"
+                                   Classes="Small"
+                                   Content="License"
+                                   Command="{Binding $parent[ItemsControl].((vm:AboutViewModel)DataContext).OpenUrlCommand}"
+                                   CommandParameter="{Binding LicenseUrl}" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <TextBlock Classes="caption"
+                 TextWrapping="Wrap"
+                 Text="QwenTray supervises a single local Qwen Code daemon. The tray icon, and this window, both drive the same process." />
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,231 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:QwenTray.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="900"
+             x:Class="QwenTray.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.field">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="*,Auto">
+
+    <ScrollViewer Grid.Row="0" Margin="20,20,20,0">
+      <StackPanel Spacing="16" MaxWidth="780" HorizontalAlignment="Left">
+
+        <TextBlock Classes="h1" Text="Settings" />
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Daemon" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="qwen executable" />
+              <TextBox Grid.Row="0" Grid.Column="1"
+                       Text="{Binding QwenExecutable}"
+                       ToolTip.Tip="The launcher that is spawned, usually qwen.cmd." />
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Workspace directory" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding WorkspaceDirectory}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The daemon opens this folder as its workspace. It is created if it does not exist. Supports %USERPROFILE% and other environment variables." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding Host}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="127.0.0.1 keeps the daemon loopback-only. Any other address (or 0.0.0.0) exposes it to the network and makes a token necessary." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="3" Classes="field" Text="Port" Margin="0,10,0,0" />
+              <TextBox Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Security" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Bearer token" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBox x:Name="TokenBox"
+                           Text="{Binding Token}"
+                           PasswordChar="&#x25CF;" />
+                  <ToggleButton Grid.Column="1"
+                                Classes="Icon"
+                                IsChecked="{Binding #TokenBox.RevealPassword}"
+                                ToolTip.Tip="Show the token"
+                                Margin="4,0,0,0">
+                    <Panel>
+                      <PathIcon Data="{StaticResource eye_off_regular}" />
+                      <PathIcon Data="{StaticResource eye_show_regular}"
+                                IsVisible="{Binding #TokenBox.RevealPassword}" />
+                    </Panel>
+                  </ToggleButton>
+                </Grid>
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Empty means no token, which is safe only while the daemon is bound to loopback. A non-loopback bind with no token makes the daemon generate an ephemeral one." />
+              </StackPanel>
+
+              <CheckBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0"
+                        Content="Require auth, including on /health (--require-auth)"
+                        IsChecked="{Binding RequireAuth}" />
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Allowed origins" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding AllowedOrigins}"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         MinHeight="52" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="One per line. Needed behind a TLS-terminating proxy, because the browser origin does not match the daemon's own address." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="3" Classes="field" Text="TLS cert path" Margin="0,10,0,0" />
+              <TextBox Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Text="{Binding TlsCertPath}" />
+
+              <TextBlock Grid.Row="4" Classes="field" Text="TLS key path" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding TlsKeyPath}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Both or neither. Setting them switches the daemon and the health check to https." />
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Capabilities" />
+
+            <CheckBox Content="Enable the session shell (--enable-session-shell)"
+                      IsChecked="{Binding EnableSessionShell}"
+                      ToolTip.Tip="Lets a connected client run terminal commands in the workspace." />
+
+            <CheckBox Content="Serve the Web Shell (--no-web disables it)"
+                      IsChecked="{Binding ServeWeb}" />
+
+            <CheckBox Content="Let the local network connect (local control)"
+                      IsChecked="{Binding LocalControl}"
+                      ToolTip.Tip="Publishes this daemon for paired devices on the same network, which normally also requires a token." />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Limits" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Max sessions" />
+              <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding MaxSessions}" />
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Max connections" Margin="0,10,0,0" />
+              <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding MaxConnections}" />
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Event ring size" Margin="0,10,0,0" />
+              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding EventRingSize}" />
+            </Grid>
+
+            <CheckBox Content="Enable per-tier HTTP rate limiting (--rate-limit)"
+                      IsChecked="{Binding RateLimit}" />
+
+            <CheckBox Content="Debug logging (-d)"
+                      IsChecked="{Binding DebugMode}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Tray behaviour" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Health poll seconds" />
+              <TextBox Grid.Row="0" Grid.Column="1"
+                       Text="{Binding HealthPollSeconds}"
+                       ToolTip.Tip="How often the tray checks the daemon. Clamped between 1 and 60." />
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Max backoff seconds" Margin="0,10,0,0" />
+              <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0"
+                       Text="{Binding MaxBackoffSeconds}"
+                       ToolTip.Tip="Ceiling for the delay between restart attempts after repeated crashes." />
+            </Grid>
+
+            <CheckBox Content="Restart the daemon automatically after it crashes"
+                      IsChecked="{Binding AutoRestart}" />
+
+            <CheckBox Content="Start QwenTray when I sign in to Windows"
+                      IsChecked="{Binding StartOnLogin}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Advanced" />
+
+            <TextBlock Classes="field" Text="Extra daemon arguments" />
+            <TextBox Text="{Binding ExtraArgs}"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     MinHeight="70"
+                     MaxHeight="240"
+                     FontFamily="Consolas,Menlo,monospace" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="One argument per line, appended to the spawn command verbatim. Use this for flags this page does not surface." />
+
+            <TextBlock Classes="h2" Text="Diagnostics" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Open daemon log"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding OpenLogFileCommand}" />
+            </StackPanel>
+
+            <TextBlock Text="{Binding LogFilePath}" Classes="caption" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding SettingsFilePath}" Classes="caption" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+        </Border>
+
+      </StackPanel>
+    </ScrollViewer>
+
+    <Border Grid.Row="1" Classes="Footer">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Content="Save"
+                Classes="Primary VariantFilled"
+                Command="{Binding SaveCommand}" />
+
+        <TextBlock Text="{Binding SaveError}"
+                   Classes="Error"
+                   MaxWidth="420"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Center" />
+        <TextBlock Text="{Binding SaveMessage}"
+                   Classes="Success"
+                   VerticalAlignment="Center" />
+        <TextBlock Text="{Binding SaveWarning}"
+                   Classes="Warning"
+                   MaxWidth="420"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Center" />
+      </StackPanel>
+    </Border>
+
+  </Grid>
+</UserControl>

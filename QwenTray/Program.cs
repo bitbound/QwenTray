@@ -1,6 +1,9 @@
 using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using QwenTray.Services;
+using QwenTray.ViewModels;
+using QwenTray.Views;
 using System.Threading;
 
 namespace QwenTray;
@@ -54,6 +57,18 @@ internal static class Program
         services.AddSingleton(settings);
         services.AddSingleton<RegistryAutostartService>();
         services.AddSingleton<DaemonSupervisor>();
+
+        services.AddSingleton<INavigationProvider, NavigationProvider>();
+        services.AddSingleton<IMainWindowViewModel, MainWindowViewModel>();
+        services.AddSingleton<DaemonViewModel>();
+        services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<AboutViewModel>();
+
+        services.AddTransient<MainWindow>();
+        services.AddTransient<DaemonView>();
+        services.AddTransient<SettingsView>();
+        services.AddTransient<AboutView>();
+
         return services.BuildServiceProvider();
     }
 

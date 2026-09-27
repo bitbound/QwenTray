@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -7,7 +8,9 @@ using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Diagnostics;
+using QwenTray.Services;
+using QwenTray.ViewModels;
+using QwenTray.Views;
 
 namespace QwenTray;
 
@@ -18,9 +21,14 @@ public partial class App : Application
     private DaemonSupervisor? _supervisor;
     private Settings? _settings;
     private RegistryAutostartService _autostart = new();
+    private INavigationProvider? _navigation;
     private ILogger<App> _logger = NullLogger<App>.Instance;
     private TrayIcon? _icon;
+    private MainWindow? _mainWindow;
+    private IMainWindowViewModel? _mainViewModel;
     private DispatcherTimer? _timer;
+    private bool _isShellInitialized;
+    private bool _isExiting;
     private bool _stopping;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -29,6 +37,8 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // The daemon is supervised from the tray while the window is closed, so closing every
+            // window must not end the process on its own.
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             desktop.Exit += OnExit;
         }
@@ -38,9 +48,26 @@ public partial class App : Application
         _logger = services?.GetService<ILogger<App>>() ?? NullLogger<App>.Instance;
         _autostart = services?.GetService<RegistryAutostartService>() ?? new RegistryAutostartService();
         _supervisor = services?.GetService<DaemonSupervisor>() ?? new DaemonSupervisor(_settings);
+        _navigation = services?.GetService<INavigationProvider>();
         _supervisor.StateChanged += OnStateChanged;
+        _autostart.Changed += OnAutostartChanged;
         _icon = GetValue(TrayIcon.IconsProperty)?.FirstOrDefault();
         SetAutostartMenuChecked();
+
+        if (services?.GetService<MainWindow>() is { } mainWindow && services.GetService<IMainWindowViewModel>() is { } mainViewModel)
+        {
+            _mainWindow = mainWindow;
+            _mainViewModel = mainViewModel;
+            mainWindow.DataContext = mainViewModel;
+            mainWindow.Opened += OnMainWindowOpened;
+            mainWindow.Closing += OnMainWindowClosing;
+
+            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)
+            {
+                lifetime.MainWindow = mainWindow;
+            }
+        }
+
         var pollSeconds = Math.Clamp(_settings.HealthPollSeconds, 1, 60);
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(pollSeconds) };
         _timer.Tick += async (_, _) => await _supervisor.PollAsync();
@@ -79,6 +106,24 @@ public partial class App : Application
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
 
+    private void OnOpenSettings(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        _ = _navigation?.NavigateTo<SettingsViewModel>();
+        ShowMainWindow();
+    }
+
+    private void OnShowWindow(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        ShowMainWindow();
+    }
+
+    private void OnTrayIconClicked(object? sender, EventArgs e)
+    {
+        ShowMainWindow();
+    }
+
     private void OnAutostart(object? sender, EventArgs e)
     {
         var enable = !_autostart.IsEnabled();
@@ -91,12 +136,18 @@ public partial class App : Application
     {
         ResetMenuItem(sender);
         _logger.LogInformation("Quit requested from tray menu.");
+        _isExiting = true;
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
     }
 
     private static void ResetMenuItem(object? sender)
     {
         if (sender is NativeMenuItem item && item.Header?.ToString() != "Start with Windows") item.IsChecked = false;
+    }
+
+    private void OnAutostartChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(SetAutostartMenuChecked);
     }
 
     private void OnStateChanged(object? sender, DaemonState state)
@@ -119,6 +170,31 @@ public partial class App : Application
     {
         var item = _icon?.Menu?.Items.OfType<NativeMenuItem>().FirstOrDefault(x => x.Header?.ToString() == "Start with Windows");
         item?.IsChecked = _autostart.IsEnabled();
+    }
+
+    // Opened fires on every show, and hiding to the tray then showing again counts. The shell view
+    // model is a singleton, so initializing per show appends a second set of nav items.
+    private void OnMainWindowOpened(object? sender, EventArgs e)
+    {
+        if (_isShellInitialized) return;
+        _isShellInitialized = true;
+        _ = _mainViewModel?.InitializeAsync();
+    }
+
+    // Closing the window parks it in the tray. The daemon keeps running from there.
+    private void OnMainWindowClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_isExiting) return;
+        e.Cancel = true;
+        _mainWindow?.Hide();
+    }
+
+    private void ShowMainWindow()
+    {
+        if (_mainWindow is null) return;
+        _mainWindow.Show();
+        _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.Activate();
     }
 
     private async void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)

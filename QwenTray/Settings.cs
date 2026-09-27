@@ -10,10 +10,25 @@ public sealed class Settings
     public int HealthPollSeconds { get; set; } = 5;
     public bool AutoRestart { get; set; } = true;
     public int MaxBackoffSeconds { get; set; } = 60;
+    public string Token { get; set; } = "";
+    public bool RequireAuth { get; set; }
+    public bool EnableSessionShell { get; set; }
+    public bool ServeWeb { get; set; } = true;
+    public bool LocalControl { get; set; }
+    public string[] AllowedOrigins { get; set; } = [];
+    public string TlsCertPath { get; set; } = "";
+    public string TlsKeyPath { get; set; } = "";
+    public int MaxSessions { get; set; } = 32;
+    public int MaxConnections { get; set; } = 256;
+    public int EventRingSize { get; set; } = 8000;
+    public bool RateLimit { get; set; }
+    public bool DebugMode { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
-    public Uri HealthUri => new($"http://{Host}:{Port}/health");
+    public bool UsesBearerAuth => !string.IsNullOrWhiteSpace(Token) || RequireAuth;
     [System.Text.Json.Serialization.JsonIgnore]
-    public Uri WebUri => new($"http://{Host}:{Port}");
+    public Uri HealthUri => new($"{(string.IsNullOrWhiteSpace(TlsCertPath) ? "http" : "https")}://{Host}:{Port}/health");
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Uri WebUri => new($"{(string.IsNullOrWhiteSpace(TlsCertPath) ? "http" : "https")}://{Host}:{Port}");
 }
 
 public static class SettingsStore
