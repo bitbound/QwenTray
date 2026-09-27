@@ -27,6 +27,7 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private IMainWindowViewModel? _mainViewModel;
     private DispatcherTimer? _timer;
+    private bool _daemonCommandBusy;
     private bool _isShellInitialized;
     private bool _isExiting;
     private bool _stopping;
@@ -52,6 +53,7 @@ public partial class App : Application
         _supervisor.StateChanged += OnStateChanged;
         _autostart.Changed += OnAutostartChanged;
         _icon = GetValue(TrayIcon.IconsProperty)?.FirstOrDefault();
+        UpdateTrayCommandAvailability(_supervisor.State);
         SetAutostartMenuChecked();
 
         if (services?.GetService<MainWindow>() is { } mainWindow && services.GetService<IMainWindowViewModel>() is { } mainViewModel)
@@ -77,9 +79,40 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private async void OnStart(object? sender, EventArgs e) { ResetMenuItem(sender); if (_supervisor is not null) await _supervisor.StartAsync(); }
-    private async void OnStop(object? sender, EventArgs e) { ResetMenuItem(sender); if (_supervisor is not null) await _supervisor.StopAsync(); }
-    private async void OnRestart(object? sender, EventArgs e) { ResetMenuItem(sender); if (_supervisor is not null) await _supervisor.RestartAsync(); }
+    private async void OnStart(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        await RunTrayCommandAsync(supervisor => supervisor.StartAsync());
+    }
+
+    private async void OnStop(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        await RunTrayCommandAsync(supervisor => supervisor.StopAsync());
+    }
+
+    private async void OnRestart(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        await RunTrayCommandAsync(supervisor => supervisor.RestartAsync());
+    }
+
+    private async Task RunTrayCommandAsync(Func<DaemonSupervisor, Task> command)
+    {
+        var supervisor = _supervisor;
+        if (supervisor is null) return;
+        _daemonCommandBusy = true;
+        UpdateTrayCommandAvailability(supervisor.State);
+        try
+        {
+            await command(supervisor);
+        }
+        finally
+        {
+            _daemonCommandBusy = false;
+            UpdateTrayCommandAvailability(supervisor.State);
+        }
+    }
 
     private void OnOpenWeb(object? sender, EventArgs e)
     {
@@ -152,6 +185,12 @@ public partial class App : Application
 
     private void OnStateChanged(object? sender, DaemonState state)
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnStateChanged(sender, state));
+            return;
+        }
+
         var file = state switch
         {
             DaemonState.Starting => "status-starting.png",
@@ -164,6 +203,21 @@ public partial class App : Application
             _icon.Icon = new WindowIcon(AssetLoader.Open(new Uri($"avares://QwenTray/Assets/{file}")));
             _icon.ToolTipText = $"QwenTray: {state.ToString().ToLowerInvariant()}";
         }
+        UpdateTrayCommandAvailability(state);
+    }
+
+    private void UpdateTrayCommandAvailability(DaemonState state)
+    {
+        var availability = DaemonCommandAvailability.From(state, _daemonCommandBusy);
+        SetMenuEnabled("Start", availability.CanStart);
+        SetMenuEnabled("Stop", availability.CanStop);
+        SetMenuEnabled("Restart", availability.CanRestart);
+    }
+
+    private void SetMenuEnabled(string header, bool enabled)
+    {
+        var item = _icon?.Menu?.Items.OfType<NativeMenuItem>().FirstOrDefault(x => x.Header?.ToString() == header);
+        if (item is not null) item.IsEnabled = enabled;
     }
 
     private void SetAutostartMenuChecked()

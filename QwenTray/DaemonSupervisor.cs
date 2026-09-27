@@ -359,7 +359,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     private HttpRequestMessage CreateLocalControlRequest(HttpMethod method, string path)
     {
-        var request = new HttpRequestMessage(method, new Uri(_settings.WebUri, path));
+        var request = new HttpRequestMessage(method, new Uri(_settings.LoopbackUri, path));
         if (!string.IsNullOrWhiteSpace(_settings.Token))
         {
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.Token.Trim());

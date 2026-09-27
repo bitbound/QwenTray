@@ -52,6 +52,35 @@ public sealed class DaemonStateTests
     }
 }
 
+public sealed class DaemonCommandAvailabilityTests
+{
+    [Theory]
+    [InlineData(DaemonState.Stopped, true, false, false)]
+    [InlineData(DaemonState.Starting, false, true, false)]
+    [InlineData(DaemonState.Running, false, true, true)]
+    [InlineData(DaemonState.Crashed, false, false, true)]
+    public void AvailabilityFollowsState(DaemonState state, bool canStart, bool canStop, bool canRestart)
+    {
+        var availability = DaemonCommandAvailability.From(state);
+        Assert.Equal(canStart, availability.CanStart);
+        Assert.Equal(canStop, availability.CanStop);
+        Assert.Equal(canRestart, availability.CanRestart);
+    }
+
+    [Theory]
+    [InlineData(DaemonState.Stopped)]
+    [InlineData(DaemonState.Starting)]
+    [InlineData(DaemonState.Running)]
+    [InlineData(DaemonState.Crashed)]
+    public void BusyDisablesEveryCommand(DaemonState state)
+    {
+        var availability = DaemonCommandAvailability.From(state, busy: true);
+        Assert.False(availability.CanStart);
+        Assert.False(availability.CanStop);
+        Assert.False(availability.CanRestart);
+    }
+}
+
 public sealed class SettingsTests
 {
     [Fact]
@@ -181,6 +210,21 @@ public sealed class DaemonArgumentsTests
     {
         Assert.Equal("http", new Settings().HealthUri.Scheme);
         Assert.Equal("https", new Settings { TlsCertPath = @"C:\c.pem", TlsKeyPath = @"C:\c.key" }.HealthUri.Scheme);
+    }
+
+    [Theory]
+    [InlineData("0.0.0.0", "127.0.0.1")]
+    [InlineData("::", "127.0.0.1")]
+    [InlineData("[::]", "127.0.0.1")]
+    [InlineData("127.0.0.1", "127.0.0.1")]
+    [InlineData("localhost", "localhost")]
+    [InlineData("192.168.0.166", "192.168.0.166")]
+    public void WebUriMapsWildcardBindToLoopback(string host, string expectedHost)
+    {
+        var settings = new Settings { Host = host };
+        Assert.Equal(expectedHost, settings.WebUri.Host);
+        Assert.Equal("127.0.0.1", settings.HealthUri.Host);
+        Assert.Equal("127.0.0.1", settings.LoopbackUri.Host);
     }
 
     [Fact]

@@ -33,6 +33,17 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     private bool _isBusy;
 
     [ObservableProperty]
+    private bool _canStart;
+
+    [ObservableProperty]
+    private bool _canStop;
+
+    [ObservableProperty]
+    private bool _canRestart;
+
+    private bool _daemonCommandBusy;
+
+    [ObservableProperty]
     private string _endpoint = string.Empty;
 
     [ObservableProperty]
@@ -107,6 +118,8 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     private async Task RunAsync(Func<Task> action)
     {
         IsBusy = true;
+        _daemonCommandBusy = true;
+        UpdateCommandAvailability(_supervisor.State);
 
         try
         {
@@ -119,6 +132,8 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
         finally
         {
             IsBusy = false;
+            _daemonCommandBusy = false;
+            UpdateCommandAvailability(_supervisor.State);
             RefreshAddresses();
             ApplyState(_supervisor.State);
         }
@@ -131,12 +146,21 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
         WebUrl = _settings.WebUri.ToString();
     }
 
+    private void UpdateCommandAvailability(DaemonState state)
+    {
+        var availability = DaemonCommandAvailability.From(state, _daemonCommandBusy);
+        CanStart = availability.CanStart;
+        CanStop = availability.CanStop;
+        CanRestart = availability.CanRestart;
+    }
+
     private void ApplyState(DaemonState state)
     {
         IsRunning = state == DaemonState.Running;
         IsStarting = state == DaemonState.Starting;
         IsCrashed = state == DaemonState.Crashed;
         IsStopped = state == DaemonState.Stopped;
+        UpdateCommandAvailability(state);
 
         StateText = state switch
         {

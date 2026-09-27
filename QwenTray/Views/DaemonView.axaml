@@ -74,7 +74,7 @@
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Classes="Primary VariantFilled"
                     Command="{Binding StartCommand}"
-                    IsEnabled="{Binding !IsBusy}">
+                    IsEnabled="{Binding CanStart}">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <PathIcon Data="{StaticResource play_regular}" />
                 <TextBlock Text="Start" VerticalAlignment="Center" />
@@ -83,7 +83,7 @@
 
             <Button Classes="Default VariantOutlined"
                     Command="{Binding StopCommand}"
-                    IsEnabled="{Binding !IsBusy}">
+                    IsEnabled="{Binding CanStop}">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <PathIcon Data="{StaticResource stop_regular}" />
                 <TextBlock Text="Stop" VerticalAlignment="Center" />
@@ -92,7 +92,7 @@
 
             <Button Classes="Default VariantOutlined"
                     Command="{Binding RestartCommand}"
-                    IsEnabled="{Binding !IsBusy}">
+                    IsEnabled="{Binding CanRestart}">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <PathIcon Data="{StaticResource arrow_sync_regular}" />
                 <TextBlock Text="Restart" VerticalAlignment="Center" />

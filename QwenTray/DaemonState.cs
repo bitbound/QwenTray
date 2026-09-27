@@ -8,6 +8,20 @@ public enum DaemonState
     Crashed
 }
 
+internal readonly record struct DaemonCommandAvailability(bool CanStart, bool CanStop, bool CanRestart)
+{
+    public static DaemonCommandAvailability From(DaemonState state, bool busy = false) => busy
+        ? new(false, false, false)
+        : state switch
+        {
+            DaemonState.Stopped => new(true, false, false),
+            DaemonState.Starting => new(false, true, false),
+            DaemonState.Running => new(false, true, true),
+            DaemonState.Crashed => new(false, false, true),
+            _ => new(false, false, false),
+        };
+}
+
 public sealed class DaemonStateMachine
 {
     public DaemonState State { get; private set; } = DaemonState.Stopped;

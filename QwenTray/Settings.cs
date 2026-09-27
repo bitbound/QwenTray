@@ -26,9 +26,20 @@ public sealed class Settings
     [System.Text.Json.Serialization.JsonIgnore]
     public bool UsesBearerAuth => !string.IsNullOrWhiteSpace(Token) || RequireAuth;
     [System.Text.Json.Serialization.JsonIgnore]
-    public Uri HealthUri => new($"{(string.IsNullOrWhiteSpace(TlsCertPath) ? "http" : "https")}://{Host}:{Port}/health");
+    private string Scheme => string.IsNullOrWhiteSpace(TlsCertPath) ? "http" : "https";
+
+    /// <summary>Bind addresses (0.0.0.0, ::) are never connectable; map them to loopback. QwenTray is co-located with the daemon.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public Uri WebUri => new($"{(string.IsNullOrWhiteSpace(TlsCertPath) ? "http" : "https")}://{Host}:{Port}");
+    public string ClientHost => Host.Trim() is "0.0.0.0" or "::" or "[::]" ? "127.0.0.1" : Host.Trim();
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Uri LoopbackUri => new($"{Scheme}://127.0.0.1:{Port}");
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Uri HealthUri => new(LoopbackUri, "/health");
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Uri WebUri => new($"{Scheme}://{ClientHost}:{Port}");
 }
 
 public static class SettingsStore
