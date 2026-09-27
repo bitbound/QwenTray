@@ -187,6 +187,10 @@ publish/
 *.pubxml
 *.publishproj
 
+# The win-x64 publish profile is deliberately tracked. It carries no secrets, and a fresh
+# clone needs it to publish the same self-contained single-file exe.
+!QwenTray/Properties/PublishProfiles/*.pubxml
+
 # Microsoft Azure Web App publish settings. Comment the next line if you want to
 # checkin your Azure Web App publish settings, but sensitive information contained
 # in these scripts will be unencrypted

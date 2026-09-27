@@ -191,4 +191,25 @@ public sealed class DaemonArgumentsTests
         Assert.Empty(DaemonSupervisor.ValidateSettings(new Settings()));
         Assert.Empty(DaemonSupervisor.ValidateSettings(new Settings { TlsCertPath = "a", TlsKeyPath = "b" }));
     }
+
+    [Fact]
+    public void DefaultPathsUseEnvironmentVariablesRatherThanAUserProfile()
+    {
+        var settings = new Settings();
+        Assert.Contains("%USERPROFILE%", settings.QwenExecutable, StringComparison.Ordinal);
+        Assert.EndsWith(@"AppData\Local\qwen-code\bin\qwen.cmd", settings.QwenExecutable, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"C:\Users\", settings.QwenExecutable, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"C:\Users\", settings.WorkspaceDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ExpandPathResolvesEnvironmentVariablesAndLeavesPlainPathsAlone()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var expanded = DaemonSupervisor.ExpandPath(@"%USERPROFILE%\Documents\Qwen");
+        Assert.Equal(Path.Combine(profile, "Documents", "Qwen"), expanded, ignoreCase: true);
+        Assert.Equal(@"D:\somewhere\else", DaemonSupervisor.ExpandPath(@"D:\somewhere\else"));
+        Assert.Equal(string.Empty, DaemonSupervisor.ExpandPath(null));
+        Assert.Equal(string.Empty, DaemonSupervisor.ExpandPath("   "));
+    }
 }

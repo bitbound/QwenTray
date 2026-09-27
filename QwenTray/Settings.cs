@@ -2,7 +2,7 @@ namespace QwenTray;
 
 public sealed class Settings
 {
-    public string QwenExecutable { get; set; } = @"C:\Users\trans\AppData\Local\qwen-code\bin\qwen.cmd";
+    public string QwenExecutable { get; set; } = @"%USERPROFILE%\AppData\Local\qwen-code\bin\qwen.cmd";
     public string WorkspaceDirectory { get; set; } = @"%USERPROFILE%\Documents\Qwen";
     public string Host { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 4170;

@@ -26,9 +26,6 @@ public sealed partial class AboutViewModel : ViewModelBase<AboutView>
         new(".NET and Microsoft.Extensions",
             "https://github.com/dotnet/runtime",
             "https://github.com/dotnet/runtime/blob/main/LICENSE.TXT"),
-        new("Fluent UI System Icons",
-            "https://github.com/microsoft/fluentui-system-icons",
-            "https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE"),
     ];
 
     protected override Task OnInitializeAsync()

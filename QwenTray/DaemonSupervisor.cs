@@ -163,7 +163,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     {
         _machine.BeginStart();
         PublishState();
-        var executable = _settings.QwenExecutable;
+        var executable = ExpandPath(_settings.QwenExecutable);
         var workspace = ResolveWorkspace();
         foreach (var warning in ValidateSettings(_settings)) _logger.LogWarning("Daemon settings warning: {Warning}", warning);
         var arguments = BuildArguments(_settings);
@@ -343,11 +343,12 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     private string? ResolveWorkspace()
     {
-        var raw = _settings.WorkspaceDirectory;
-        if (string.IsNullOrWhiteSpace(raw)) return null;
-        var expanded = Environment.ExpandEnvironmentVariables(raw).Trim();
+        var expanded = ExpandPath(_settings.WorkspaceDirectory);
         return expanded.Length == 0 ? null : expanded;
     }
+
+    // Paths in settings may use %VARIABLE% so a settings file can move between machines.
+    internal static string ExpandPath(string? value) => Environment.ExpandEnvironmentVariables(value ?? string.Empty).Trim();
 
     private static string QuoteArgument(string value) => value.Length > 0 && (value.Contains(' ', StringComparison.Ordinal) || value.Contains('"', StringComparison.Ordinal)) ? "\"" + value.Replace("\"", "\\\"") + "\"" : value;
 
