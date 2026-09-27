@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,6 +24,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     private bool _intentionalExit;
     private bool _disposed;
     private string? _logPath;
+    private string? _localControlPairingUrl;
+    private readonly SemaphoreSlim _localControlGate = new(1, 1);
+    private bool _localControlRedactionLogged;
+    private bool _localControlEnableAttempted;
     private Task? _restartTask;
     private CancellationTokenSource _shutdown = new();
     private DaemonState _lastPublished = DaemonState.Stopped;
@@ -35,6 +40,62 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     public DaemonState State => _machine.State;
     public string? LogPath => _logPath;
+    public string? LocalControlPairingUrl => _localControlPairingUrl;
+    public event EventHandler? LocalControlPairingUrlChanged;
+
+    public async Task RefreshLocalControlPairingAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_settings.LocalControl || !IsLoopbackHost(_settings.Host) || !_settings.ServeWeb || State is not (DaemonState.Starting or DaemonState.Running))
+        {
+            _localControlEnableAttempted = false;
+            SetLocalControlPairingUrl(null);
+            return;
+        }
+
+        if (!await _localControlGate.WaitAsync(0, cancellationToken)) return;
+        try
+        {
+            using var statusRequest = CreateLocalControlRequest(HttpMethod.Get, "/workspace/local-control");
+            using var statusResponse = await _http.SendAsync(statusRequest, cancellationToken);
+            if (!statusResponse.IsSuccessStatusCode)
+            {
+                SetLocalControlPairingUrl(null);
+                return;
+            }
+
+            using var statusJson = await JsonDocument.ParseAsync(await statusResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            var status = statusJson.RootElement;
+            if (!status.TryGetProperty("active", out var active) || active.ValueKind != JsonValueKind.True)
+            {
+                if (_localControlEnableAttempted) return;
+                _localControlEnableAttempted = true;
+                using var enableRequest = CreateLocalControlRequest(HttpMethod.Post, "/workspace/local-control/enable");
+                using var enableResponse = await _http.SendAsync(enableRequest, cancellationToken);
+                if (!enableResponse.IsSuccessStatusCode)
+                {
+                    _localControlEnableAttempted = false;
+                    SetLocalControlPairingUrl(null);
+                    return;
+                }
+
+                using var enableJson = await JsonDocument.ParseAsync(await enableResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+                UpdateLocalControlPairingUrl(enableJson.RootElement);
+                return;
+            }
+
+            UpdateLocalControlPairingUrl(status);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException or UriFormatException)
+        {
+            _localControlEnableAttempted = false;
+            SetLocalControlPairingUrl(null);
+            _logger.LogDebug(exception, "Could not retrieve the device pairing link from Qwen Code.");
+        }
+        finally
+        {
+            _localControlGate.Release();
+        }
+    }
 
     /// <summary>
     /// The supervised daemon's process id, whether it is our child or a listener we adopted.
@@ -90,6 +151,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _process?.Dispose();
         _process = null;
         if (_adoptedPid is int adoptedPid && !IsProcessRunning(adoptedPid)) _adoptedPid = null;
+        SetLocalControlPairingUrl(null);
         _machine.UserStopped();
         PublishState();
     }
@@ -113,6 +175,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             var tail = TakeStderrTail();
             _process.Dispose();
             _process = null;
+            if (_intentionalExit || exitCode != 0) SetLocalControlPairingUrl(null);
             if (_intentionalExit)
             {
                 _logger.LogInformation("Daemon child exited with code {ExitCode} (intentional stop).", exitCode);
@@ -140,6 +203,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         {
             _machine.HealthSucceeded();
             PublishState();
+            await RefreshLocalControlPairingAsync(_shutdown.Token);
         }
         else if (State is DaemonState.Starting or DaemonState.Running)
         {
@@ -167,6 +231,8 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         var workspace = ResolveWorkspace();
         foreach (var warning in ValidateSettings(_settings)) _logger.LogWarning("Daemon settings warning: {Warning}", warning);
         var arguments = BuildArguments(_settings);
+        SetLocalControlPairingUrl(null);
+        _localControlEnableAttempted = false;
         var command = $"\"{executable}\" " + string.Join(" ", arguments.Select(QuoteArgument));
         var start = new ProcessStartInfo
         {
@@ -236,9 +302,16 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         return args;
     }
 
+    private static bool IsLoopbackHost(string host) => string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
     internal static IEnumerable<string> ValidateSettings(Settings settings)
     {
         if (string.IsNullOrWhiteSpace(settings.Host)) yield return "Hostname is empty; the daemon refuses to start.";
+        if (settings.LocalControl && !IsLoopbackHost(settings.Host)) yield return "Device pairing requires the main daemon address to be 127.0.0.1.";
+        if (settings.LocalControl && !settings.ServeWeb) yield return "Device pairing requires the Web Shell to be enabled.";
+        if (settings.LocalControl && settings.ExtraArgs.Any(argument => argument.StartsWith("--hostname", StringComparison.Ordinal))) yield return "Remove the --hostname override from extra arguments to enable device pairing.";
+        if (settings.LocalControl && settings.ExtraArgs.Any(argument => string.Equals(argument, "--no-web", StringComparison.Ordinal))) yield return "Remove --no-web from extra arguments to enable device pairing.";
+        if (settings.LocalControl && settings.ExtraArgs.Any(argument => string.Equals(argument, "--local-control", StringComparison.Ordinal))) yield return "Remove --local-control from extra arguments because the setting already enables it.";
         if (settings.RequireAuth && string.IsNullOrWhiteSpace(settings.Token)) yield return "Require auth is set without a token; the daemon only fails fast on a loopback bind.";
         var hasCert = !string.IsNullOrWhiteSpace(settings.TlsCertPath);
         var hasKey = !string.IsNullOrWhiteSpace(settings.TlsKeyPath);
@@ -268,19 +341,68 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(e.Data)) return;
         TryCaptureLogPath(e.Data);
-        _logger.LogDebug("daemon stdout: {Line}", e.Data);
+        if (!_settings.LocalControl) _logger.LogDebug("daemon stdout: {Line}", e.Data);
     }
 
     private void OnStderr(object sender, DataReceivedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(e.Data)) return;
         TryCaptureLogPath(e.Data);
+        if (_settings.LocalControl) return;
         lock (_tailGate)
         {
             _stderrTail.Add(e.Data);
             if (_stderrTail.Count > StderrTailLines) _stderrTail.RemoveAt(0);
         }
         _logger.LogDebug("daemon stderr: {Line}", e.Data);
+    }
+
+    private HttpRequestMessage CreateLocalControlRequest(HttpMethod method, string path)
+    {
+        var request = new HttpRequestMessage(method, new Uri(_settings.WebUri, path));
+        if (!string.IsNullOrWhiteSpace(_settings.Token))
+        {
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.Token.Trim());
+        }
+        return request;
+    }
+
+    internal static bool TryReadLocalControlPairingUrl(JsonElement root, out string? url)
+    {
+        url = null;
+        if (!root.TryGetProperty("active", out var active) || active.ValueKind != JsonValueKind.True) return false;
+        if (!root.TryGetProperty("url", out var value) || value.ValueKind != JsonValueKind.String) return false;
+        if (!Uri.TryCreate(value.GetString(), UriKind.Absolute, out _)) return false;
+        url = value.GetString();
+        return true;
+    }
+
+    private void UpdateLocalControlPairingUrl(JsonElement status)
+    {
+        if (TryReadLocalControlPairingUrl(status, out var url))
+        {
+            SetLocalControlPairingUrl(url);
+        }
+        else if (status.TryGetProperty("urlRedacted", out var redacted) && redacted.ValueKind == JsonValueKind.True)
+        {
+            if (!_localControlRedactionLogged)
+            {
+                _logger.LogWarning("Qwen Code withheld the device pairing link. Check the daemon authentication settings.");
+                _localControlRedactionLogged = true;
+            }
+        }
+        else
+        {
+            SetLocalControlPairingUrl(null);
+        }
+    }
+
+    private void SetLocalControlPairingUrl(string? url)
+    {
+        if (string.Equals(_localControlPairingUrl, url, StringComparison.Ordinal)) return;
+        _localControlPairingUrl = url;
+        if (url is null) _localControlRedactionLogged = false;
+        LocalControlPairingUrlChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void TryCaptureLogPath(string line)
@@ -303,7 +425,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         }
     }
 
-    private static string FormatTail(string[] tail) => tail.Length == 0 ? string.Empty : " Last stderr output:" + Environment.NewLine + string.Join(Environment.NewLine, tail);
+    private string FormatTail(string[] tail) => tail.Length == 0 || _settings.LocalControl ? string.Empty : " Last stderr output:" + Environment.NewLine + string.Join(Environment.NewLine, tail);
 
     private async Task<bool> IsHealthyAsync()
     {
@@ -366,7 +488,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _disposed = true;
         _shutdown.Cancel();
         await StopAsync();
+        SetLocalControlPairingUrl(null);
         _shutdown.Dispose();
         _http.Dispose();
+        _localControlGate.Dispose();
     }
 }

@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using Microsoft.Extensions.Logging;
+using QRCoder;
 using QwenTray.Views;
 
 namespace QwenTray.ViewModels;
@@ -46,6 +49,15 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     [ObservableProperty]
     private bool _localControl;
+
+    [ObservableProperty]
+    private Bitmap? _localControlPairingQr;
+
+    [ObservableProperty]
+    private bool _hasLocalControlPairingQr;
+
+    [ObservableProperty]
+    private bool _showLocalControlPairingPending;
 
     [ObservableProperty]
     private string _maxSessions = string.Empty;
@@ -96,6 +108,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _supervisor = supervisor;
         _autostart = autostart;
         _logger = logger;
+        _supervisor.LocalControlPairingUrlChanged += OnLocalControlPairingUrlChanged;
     }
 
     public string SettingsFilePath => SettingsStore.FilePath;
@@ -126,6 +139,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         MaxBackoffSeconds = _settings.MaxBackoffSeconds.ToString();
         ExtraArgs = string.Join(Environment.NewLine, _settings.ExtraArgs);
         StartOnLogin = _autostart.IsEnabled();
+        UpdateLocalControlPairing(_supervisor.LocalControlPairingUrl);
 
         return Task.CompletedTask;
     }
@@ -149,6 +163,18 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             return;
         }
 
+        if (LocalControl && !string.Equals(Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            SaveError = "Device pairing requires the main address to be 127.0.0.1. Change the address or turn off device pairing.";
+            return;
+        }
+
+        if (LocalControl && !ServeWeb)
+        {
+            SaveError = "Device pairing requires the Web Shell to be enabled.";
+            return;
+        }
+
         _settings.QwenExecutable = QwenExecutable.Trim();
         _settings.WorkspaceDirectory = WorkspaceDirectory.Trim();
         _settings.Host = Host.Trim();
@@ -161,6 +187,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _settings.EnableSessionShell = EnableSessionShell;
         _settings.ServeWeb = ServeWeb;
         _settings.LocalControl = LocalControl;
+        UpdateLocalControlPairing(_supervisor.LocalControlPairingUrl);
         _settings.MaxSessions = ParseInt(MaxSessions, _settings.MaxSessions);
         _settings.MaxConnections = ParseInt(MaxConnections, _settings.MaxConnections);
         _settings.EventRingSize = ParseInt(EventRingSize, _settings.EventRingSize);
@@ -188,7 +215,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             _logger.LogInformation("Start with Windows {State}.", StartOnLogin ? "enabled" : "disabled");
         }
 
-        _logger.LogInformation("Settings saved. Daemon arguments: {Arguments}", string.Join(' ', DaemonSupervisor.BuildArguments(_settings)));
+        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl}.", DaemonSupervisor.BuildArguments(_settings).Count, _settings.LocalControl);
 
         var warnings = DaemonSupervisor.ValidateSettings(_settings).ToList();
         foreach (var warning in warnings)
@@ -223,6 +250,36 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         }
 
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    }
+
+    private void OnLocalControlPairingUrlChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() => UpdateLocalControlPairing(_supervisor.LocalControlPairingUrl));
+    }
+
+    private void UpdateLocalControlPairing(string? url)
+    {
+        ShowLocalControlPairingPending = LocalControl && string.Equals(Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase) && ServeWeb && string.IsNullOrWhiteSpace(url);
+        LocalControlPairingQr?.Dispose();
+        LocalControlPairingQr = null;
+        HasLocalControlPairingQr = false;
+        if (!LocalControl || !string.Equals(Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase) || !ServeWeb || string.IsNullOrWhiteSpace(url)) return;
+
+        try
+        {
+            using var generator = new QRCodeGenerator();
+            using var data = generator.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q);
+            var png = new PngByteQRCode(data).GetGraphic(8);
+            using var stream = new MemoryStream(png);
+            LocalControlPairingQr = new Bitmap(stream);
+            HasLocalControlPairingQr = true;
+            ShowLocalControlPairingPending = false;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not render the local device pairing QR code.");
+            ShowLocalControlPairingPending = false;
+        }
     }
 
     private static int ParseInt(string? text, int fallback) => int.TryParse((text ?? string.Empty).Trim(), out var value) ? value : fallback;

@@ -193,6 +193,31 @@ public sealed class DaemonArgumentsTests
     }
 
     [Fact]
+    public void LocalControlRequiresLoopbackAndWebShell()
+    {
+        Assert.Empty(DaemonSupervisor.ValidateSettings(new Settings { LocalControl = true }));
+        Assert.Contains(DaemonSupervisor.ValidateSettings(new Settings { LocalControl = true, Host = "::1" }), warning => warning.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(DaemonSupervisor.ValidateSettings(new Settings { LocalControl = true, Host = "0.0.0.0" }), warning => warning.Contains("main daemon address", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(DaemonSupervisor.ValidateSettings(new Settings { LocalControl = true, ServeWeb = false }), warning => warning.Contains("Web Shell", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(DaemonSupervisor.ValidateSettings(new Settings { LocalControl = true, ExtraArgs = ["--hostname", "0.0.0.0"] }), warning => warning.Contains("--hostname", StringComparison.Ordinal));
+        Assert.Contains(DaemonSupervisor.ValidateSettings(new Settings { LocalControl = true, ExtraArgs = ["--no-web"] }), warning => warning.Contains("--no-web", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void LocalControlStatusAcceptsOnlyActiveAbsolutePairingUrls()
+    {
+        using var active = System.Text.Json.JsonDocument.Parse("{\"active\":true,\"url\":\"http://192.168.1.5:4170/#token=secret\"}");
+        Assert.True(DaemonSupervisor.TryReadLocalControlPairingUrl(active.RootElement, out var url));
+        Assert.Equal("http://192.168.1.5:4170/#token=secret", url);
+
+        using var inactive = System.Text.Json.JsonDocument.Parse("{\"active\":false,\"url\":\"http://192.168.1.5:4170/#token=secret\"}");
+        Assert.False(DaemonSupervisor.TryReadLocalControlPairingUrl(inactive.RootElement, out _));
+
+        using var redacted = System.Text.Json.JsonDocument.Parse("{\"active\":true,\"urlRedacted\":true}");
+        Assert.False(DaemonSupervisor.TryReadLocalControlPairingUrl(redacted.RootElement, out _));
+    }
+
+    [Fact]
     public void DefaultPathsUseEnvironmentVariablesRatherThanAUserProfile()
     {
         var settings = new Settings();
