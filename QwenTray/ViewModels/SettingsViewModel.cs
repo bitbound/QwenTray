@@ -96,7 +96,16 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string? _saveMessage;
 
     [ObservableProperty]
+    private double _saveMessageOpacity = 1d;
+
+    [ObservableProperty]
     private string? _saveWarning;
+
+    // The hold and fade lengths have to agree with the OpacityTransition on the save message in SettingsView.axaml.
+    private static readonly TimeSpan SaveMessageHold = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan SaveMessageFade = TimeSpan.FromMilliseconds(300);
+
+    private CancellationTokenSource? _saveMessageFadeOut;
 
     public SettingsViewModel(
         Settings settings,
@@ -236,6 +245,30 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         else
         {
             SaveMessage = "Saved.";
+        }
+
+        ScheduleSaveMessageFadeOut();
+    }
+
+    private void ScheduleSaveMessageFadeOut()
+    {
+        _saveMessageFadeOut?.Cancel();
+        var fadeOut = _saveMessageFadeOut = new CancellationTokenSource();
+        SaveMessageOpacity = 1d;
+        _ = FadeOutSaveMessageAsync(fadeOut.Token);
+    }
+
+    private async Task FadeOutSaveMessageAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(SaveMessageHold, cancellationToken);
+            SaveMessageOpacity = 0d;
+            await Task.Delay(SaveMessageFade, cancellationToken);
+            SaveMessage = null;
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 

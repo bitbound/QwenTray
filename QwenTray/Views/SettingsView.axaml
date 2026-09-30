@@ -238,7 +238,14 @@
                    VerticalAlignment="Center" />
         <TextBlock Text="{Binding SaveMessage}"
                    Classes="Success"
-                   VerticalAlignment="Center" />
+                   Opacity="{Binding SaveMessageOpacity}"
+                   VerticalAlignment="Center">
+          <TextBlock.Transitions>
+            <Transitions>
+              <DoubleTransition Property="Opacity" Duration="0:0:0.3" />
+            </Transitions>
+          </TextBlock.Transitions>
+        </TextBlock>
         <TextBlock Text="{Binding SaveWarning}"
                    Classes="Warning"
                    MaxWidth="420"
