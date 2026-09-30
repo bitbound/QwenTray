@@ -106,6 +106,11 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     public async Task StartAsync()
     {
+        if (_disposed)
+        {
+            _logger.LogDebug("Start requested after disposal. Ignoring.");
+            return;
+        }
         if (State is DaemonState.Starting or DaemonState.Running)
         {
             _logger.LogDebug("Start requested while already {State}; ignoring.", State);
@@ -437,7 +442,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             using var response = await _http.SendAsync(request, _shutdown.Token);
             return response.IsSuccessStatusCode;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException) { return false; }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException or ObjectDisposedException) 
+        { 
+          return false; 
+        }
     }
 
     private static bool IsProcessRunning(int pid)
@@ -485,8 +493,17 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (_disposed) return;
         _disposed = true;
         _shutdown.Cancel();
+        // The cancel unwinds the backoff delay. Awaiting it keeps a pending restart from
+        // spawning a daemon while the app is exiting.
+        try
+        {
+            if (_restartTask is not null) await _restartTask;
+        }
+        catch (OperationCanceledException) { }
+        catch (InvalidOperationException) { }
         await StopAsync();
         SetLocalControlPairingUrl(null);
         _shutdown.Dispose();

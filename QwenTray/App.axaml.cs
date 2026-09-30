@@ -251,11 +251,10 @@ public partial class App : Application
         _mainWindow.Activate();
     }
 
-    private async void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
+    private void OnExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
     {
         if (_stopping) return;
         _stopping = true;
         _timer?.Stop();
-        if (_supervisor is not null) await _supervisor.DisposeAsync();
     }
 }
