@@ -3,6 +3,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Microsoft.Extensions.Logging;
 using QRCoder;
+using QwenTray.Services;
 using QwenTray.Views;
 
 namespace QwenTray.ViewModels;
@@ -12,6 +13,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private readonly Settings _settings;
     private readonly DaemonSupervisor _supervisor;
     private readonly RegistryAutostartService _autostart;
+    private readonly ICertificateTrustService _certTrust;
     private readonly ILogger<SettingsViewModel> _logger;
 
     [ObservableProperty]
@@ -101,6 +103,15 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     [ObservableProperty]
     private string? _saveWarning;
 
+    [ObservableProperty]
+    private bool _isPublisherTrusted;
+
+    [ObservableProperty]
+    private bool _isTrustingPublisher;
+
+    [ObservableProperty]
+    private string? _publisherTrustMessage;
+
     // The hold and fade lengths have to agree with the OpacityTransition on the save message in SettingsView.axaml.
     private static readonly TimeSpan SaveMessageHold = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan SaveMessageFade = TimeSpan.FromMilliseconds(300);
@@ -111,11 +122,13 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         Settings settings,
         DaemonSupervisor supervisor,
         RegistryAutostartService autostart,
+        ICertificateTrustService certTrust,
         ILogger<SettingsViewModel> logger)
     {
         _settings = settings;
         _supervisor = supervisor;
         _autostart = autostart;
+        _certTrust = certTrust;
         _logger = logger;
         _supervisor.LocalControlPairingUrlChanged += OnLocalControlPairingUrlChanged;
     }
@@ -149,6 +162,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         ExtraArgs = string.Join(Environment.NewLine, _settings.ExtraArgs);
         StartOnLogin = _autostart.IsEnabled();
         UpdateLocalControlPairing(_supervisor.LocalControlPairingUrl);
+        RefreshPublisherTrustState();
 
         return Task.CompletedTask;
     }
@@ -269,6 +283,44 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+
+    // QwenTray is signed with a self-signed cert that public machines have no reason to trust, so
+    // the settings page offers to plant the public key in the per-user Trusted Root store (no elevation).
+    private void RefreshPublisherTrustState()
+    {
+        try
+        {
+            IsPublisherTrusted = _certTrust.IsPublisherTrusted();
+        }
+        catch (Exception ex)
+        {
+            PublisherTrustMessage = $"Could not read the certificate stores: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task TrustPublisherAsync()
+    {
+        PublisherTrustMessage = null;
+        IsTrustingPublisher = true;
+
+        try
+        {
+            // Certificate store writes can hit slow group-policy callbacks, so keep the UI free.
+            await Task.Run(_certTrust.TrustPublisher);
+
+            IsPublisherTrusted = true;
+            PublisherTrustMessage = "Bitbound is now trusted for this user account. Already-downloaded copies of QwenTray show Bitbound as the verified publisher.";
+        }
+        catch (Exception ex)
+        {
+            PublisherTrustMessage = $"Could not trust the certificate: {ex.Message}";
+        }
+        finally
+        {
+            IsTrustingPublisher = false;
         }
     }
 

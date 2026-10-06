@@ -196,6 +196,37 @@
 
         <Border Classes="Card">
           <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Publisher trust" />
+
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="QwenTray builds are signed with a self-signed Bitbound certificate. Windows only trusts certificate authorities from the public web, so add the certificate's public key to this user's certificate store to have signatures validate and Explorer name Bitbound as the publisher." />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Trust Bitbound publisher"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding TrustPublisherCommand}"
+                      IsEnabled="{Binding !IsTrustingPublisher}"
+                      IsVisible="{Binding !IsPublisherTrusted}" />
+              <TextBlock Text="Spinning up the certificate stores…"
+                         Classes="caption"
+                         VerticalAlignment="Center"
+                         IsVisible="{Binding IsTrustingPublisher}" />
+              <TextBlock Text="The Bitbound certificate is trusted for this user."
+                         Classes="field"
+                         VerticalAlignment="Center"
+                         IsVisible="{Binding IsPublisherTrusted}" />
+            </StackPanel>
+
+            <TextBlock Text="{Binding PublisherTrustMessage}"
+                       Classes="caption"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding PublisherTrustMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Advanced" />
 
             <TextBlock Classes="field" Text="Extra daemon arguments" />

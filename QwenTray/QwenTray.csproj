@@ -6,6 +6,7 @@
     <ApplicationIcon>Assets\appicon.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <IsPackable>false</IsPackable>
+    <PackageProjectUrl>https://github.com/bitbound/QwenTray</PackageProjectUrl>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -14,7 +15,9 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
-    <AvaloniaResource Include="Assets\**" />
+    <AvaloniaResource Include="Assets\**" Exclude="Assets\bitbound.cer" />
+    <!-- Public half of the CN=Bitbound code-signing cert, offered to the user in Settings. -->
+    <EmbeddedResource Include="Assets\bitbound.cer" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="QwenTray.Tests" />
@@ -35,4 +38,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
+
+  <!-- Authenticode-signs everything bundled into the single-file EXE (see build\WindowsSign.Build.targets). -->
+  <Import Project="..\build\WindowsSign.Build.targets" />
 </Project>

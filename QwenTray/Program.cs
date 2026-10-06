@@ -58,6 +58,7 @@ internal static class Program
         services.AddSingleton(settings);
         services.AddSingleton<RegistryAutostartService>();
         services.AddSingleton<DaemonSupervisor>();
+        services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();
 
         services.AddSingleton<INavigationProvider, NavigationProvider>();
         services.AddSingleton<IMainWindowViewModel, MainWindowViewModel>();

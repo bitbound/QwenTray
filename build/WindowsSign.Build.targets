@@ -1,0 +1,111 @@
+<Project>
+
+  <!--
+    Authenticode signing for the single-file publish bundle, using a local/CI
+    Windows certificate store (self-signed "Bitbound" cert).
+
+    - SignBundledBinaries : signs every .dll/.exe that goes into the single-file
+      bundle, right before GenerateSingleFileBundle. The apphost EXE is excluded
+      because the bundler rewrites it; it gets covered by SignPublishedExecutable.
+      Sign-BundleFiles.ps1 skips files that are already signed, so the
+      Microsoft-signed runtime assemblies keep their signatures.
+    - SignPublishedExecutable : signs the final bundle EXE after publish.
+
+    The cert is looked up in Cert:\CurrentUser\My by subject (CN=Bitbound). In
+    GitHub Actions the workflow imports the PFX from secrets into that store
+    first. Set EnableSigning=false to opt out. Requires the Sign CLI global
+    tool: install the "sign" dotnet tool (prerelease) via
+      dotnet tool install [options] sign
+    (see the Install Sign CLI step in .github\workflows\release.yml).
+  -->
+
+  <PropertyGroup>
+    <EnableSigning Condition="'$(EnableSigning)' == ''">true</EnableSigning>
+    <SignCertSubject Condition="'$(SignCertSubject)' == ''">CN=Bitbound</SignCertSubject>
+    <SignDescription Condition="'$(SignDescription)' == ''">$(AssemblyName)</SignDescription>
+    <SignDescriptionUrl Condition="'$(SignDescriptionUrl)' == ''">$(PackageProjectUrl)</SignDescriptionUrl>
+    <SignTimestampUrl Condition="'$(SignTimestampUrl)' == ''">http://timestamp.digicert.com</SignTimestampUrl>
+    <SignToolPath Condition="'$(SignToolPath)' == '' And Exists('$(USERPROFILE)\.dotnet\tools\sign.exe')">$(USERPROFILE)\.dotnet\tools\sign.exe</SignToolPath>
+    <SignToolPath Condition="'$(SignToolPath)' == ''">sign</SignToolPath>
+    <SignTimestampArgs Condition="'$(SignTimestampUrl)' != ''">-t &quot;$(SignTimestampUrl)&quot; -td SHA256</SignTimestampArgs>
+    <_WindowsSignEnabled Condition="'$(EnableSigning)' == 'true' And '$(OS)' == 'Windows_NT' And '$(PublishSingleFile)' == 'true'">true</_WindowsSignEnabled>
+  </PropertyGroup>
+
+  <!-- Resolve the signing certificate subject to the SHA-256 fingerprint the Sign CLI needs. -->
+  <Target Name="ResolveSigningCertificate">
+    <Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Find-SigningCert.ps1&quot; -Subject &quot;$(SignCertSubject)&quot;" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_SignCertFingerprintRaw" />
+    </Exec>
+
+    <PropertyGroup>
+      <_SignCertFingerprint>$([System.String]::Copy('$(_SignCertFingerprintRaw)').Trim())</_SignCertFingerprint>
+    </PropertyGroup>
+
+    <Error Condition="'$(_SignCertFingerprint)' == ''"
+      Text="Code signing is enabled but no certificate with subject '$(SignCertSubject)' and a private key was found in Cert:\CurrentUser\My. Import the cert into the current user's Personal store, or pass -p:EnableSigning=false." />
+
+    <Message Importance="high" Text="Signing with certificate '$(SignCertSubject)' ($(_SignCertFingerprint)) via $(SignToolPath)." />
+  </Target>
+
+  <Target Name="SignBundledBinaries"
+    BeforeTargets="GenerateSingleFileBundle"
+    DependsOnTargets="PrepareForBundle;ResolveSigningCertificate"
+    Condition="'$(_WindowsSignEnabled)' == 'true'">
+    <PropertyGroup>
+      <_SignedAppHostFileName>$([System.IO.Path]::GetFileName('$(AppHostFile)'))</_SignedAppHostFileName>
+      <_BundleSignFileList>$(IntermediateOutputPath)bundle-files-to-sign.txt</_BundleSignFileList>
+    </PropertyGroup>
+
+    <!--
+      FilesToBundle holds everything about to be embedded in the single-file bundle,
+      including native DLLs under runtimes/*. Exclude the apphost EXE (the bundler
+      rewrites it, voiding its signature) and anything that isn't a PE file.
+    -->
+    <ItemGroup>
+      <_BundleBinaryFilesToSign Include="@(FilesToBundle)"
+        Condition="'%(FilesToBundle.RelativePath)' != '$(_SignedAppHostFileName)'" />
+      <_BundleBinaryFilesToSign Remove="@(_BundleBinaryFilesToSign)"
+        Condition="'%(Extension)' != '.dll' And '%(Extension)' != '.exe'" />
+    </ItemGroup>
+
+    <WriteLinesToFile Condition="'@(_BundleBinaryFilesToSign)' != ''"
+      File="$(_BundleSignFileList)"
+      Lines="@(_BundleBinaryFilesToSign -> '%(Identity)')"
+      Overwrite="true"
+      Encoding="utf-8" />
+
+    <!-- The helper drops already-signed files, which keeps the Microsoft-signed runtime
+         assemblies intact and holds the command line under the Windows length limit. -->
+    <Exec Condition="'@(_BundleBinaryFilesToSign)' != ''"
+      Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Sign-BundleFiles.ps1&quot; -FileList &quot;$(_BundleSignFileList)&quot; -BaseDirectory &quot;$(MSBuildProjectDirectory)&quot; -Fingerprint &quot;$(_SignCertFingerprint)&quot; -SignTool &quot;$(SignToolPath)&quot; -Description &quot;$(SignDescription)&quot; -DescriptionUrl &quot;$(SignDescriptionUrl)&quot; -TimestampUrl &quot;$(SignTimestampUrl)&quot;"
+      StandardOutputImportance="high"
+      StandardErrorImportance="high" />
+
+    <Message Condition="'@(_BundleBinaryFilesToSign)' != ''"
+      Text="Checked @(_BundleBinaryFilesToSign->Count()) bundled binaries for signing."
+      Importance="high" />
+  </Target>
+
+  <!-- Sign the final single-file EXE in the publish output (apphost + bundle live here now).
+       TargetFileName is still QwenTray.dll here, so build the apphost name from AssemblyName. -->
+  <Target Name="SignPublishedExecutable"
+    AfterTargets="Publish"
+    DependsOnTargets="ResolveSigningCertificate"
+    Condition="'$(_WindowsSignEnabled)' == 'true'">
+    <PropertyGroup>
+      <_PublishedExePath>$([MSBuild]::NormalizePath('$([MSBuild]::EnsureTrailingSlash($(PublishDir)))', '$(AssemblyName).exe'))</_PublishedExePath>
+    </PropertyGroup>
+
+    <Exec Condition="Exists('$(_PublishedExePath)')"
+      Command="&quot;$(SignToolPath)&quot; code certificate-store -cfp $(_SignCertFingerprint) -d &quot;$(SignDescription)&quot; -u &quot;$(SignDescriptionUrl)&quot; $(SignTimestampArgs) -fd SHA256 &quot;$(_PublishedExePath)&quot;"
+      StandardOutputImportance="high"
+      StandardErrorImportance="high" />
+
+    <Error Condition="!Exists('$(_PublishedExePath)')"
+      Text="SignPublishedExecutable: expected single-file EXE '$(_PublishedExePath)' was not found after publish; cannot sign it." />
+
+    <Message Condition="Exists('$(_PublishedExePath)')"
+      Text="Signed $(_PublishedExePath)." Importance="high" />
+  </Target>
+
+</Project>
