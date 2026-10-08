@@ -1,40 +1,37 @@
-using System.Diagnostics;
 using System.Net.Http;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using QwenTray.Services;
 
 namespace QwenTray;
 
 public sealed class DaemonSupervisor : IAsyncDisposable
 {
-    private const int StderrTailLines = 20;
-    private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
     private static readonly Regex LogPathRegex = new(@"daemon log\s*[→>\-]*\s*(.+?\.log)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private readonly Settings _settings;
+    private readonly IWslDistro _wsl;
     private readonly ILogger<DaemonSupervisor> _logger;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly DaemonStateMachine _machine = new();
-    private readonly List<string> _stderrTail = [];
-    private readonly object _tailGate = new();
-    private Process? _process;
-    private int? _adoptedPid;
+    private readonly SemaphoreSlim _localControlGate = new(1, 1);
+    private IProcess? _process;
     private bool _intentionalExit;
     private bool _disposed;
     private string? _logPath;
     private string? _localControlPairingUrl;
-    private readonly SemaphoreSlim _localControlGate = new(1, 1);
     private bool _localControlRedactionLogged;
     private bool _localControlEnableAttempted;
     private Task? _restartTask;
     private CancellationTokenSource _shutdown = new();
     private DaemonState _lastPublished = DaemonState.Stopped;
 
-    public DaemonSupervisor(Settings settings, ILogger<DaemonSupervisor>? logger = null)
+    public DaemonSupervisor(Settings settings, IWslDistro wsl, ILogger<DaemonSupervisor>? logger = null)
     {
         _settings = settings;
+        _wsl = wsl;
         _logger = logger ?? NullLogger<DaemonSupervisor>.Instance;
     }
 
@@ -97,10 +94,15 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// The supervised daemon's process id, whether it is our child or a listener we adopted.
-    /// </summary>
-    public int? DaemonProcessId => _process is { HasExited: false } process ? process.Id : _adoptedPid;
+    /// <summary>The supervised wsl.exe host process id, or nothing once it has exited.</summary>
+    public int? DaemonProcessId
+    {
+        get
+        {
+            try { return _process is { HasExited: false } process ? process.Id : null; }
+            catch (InvalidOperationException) { return null; }
+        }
+    }
 
     public event EventHandler<DaemonState>? StateChanged;
 
@@ -122,15 +124,38 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             _shutdown = new CancellationTokenSource();
         }
         _intentionalExit = false;
+
+        // A daemon already answering is adopted, which covers a distro that outlived a QwenTray restart.
         if (await IsHealthyAsync())
         {
-            _adoptedPid = await FindListenerPidAsync(_settings.Port);
             _machine.Adopt();
-            _logger.LogInformation("Adopting existing daemon on port {Port} (pid {Pid}).", _settings.Port, _adoptedPid?.ToString() ?? "unknown");
+            _logger.LogInformation("Adopting the daemon already answering on port {Port}.", _settings.Port);
             PublishState();
             return;
         }
-        Spawn();
+
+        _machine.BeginStart();
+        PublishState();
+        _logPath = null;
+        var profile = _settings.ResolveActiveProfile();
+        var arguments = BuildArguments(_settings, _settings.WslDistroName, profile);
+        foreach (var warning in ValidateSettings(_settings)) _logger.LogWarning("Daemon settings warning: {Warning}", warning);
+        SetLocalControlPairingUrl(null);
+        _localControlEnableAttempted = false;
+
+        try
+        {
+            var process = _process = _wsl.StartDaemon(_settings, _settings.WslDistroName, profile);
+            _ = PumpOutputAsync(process, _shutdown.Token);
+            _logger.LogInformation("Spawned the daemon in distro {Distro} as {User}. Pid={Pid} ArgCount={ArgCount}", _settings.WslDistroName, profile.LinuxUser, DaemonProcessId, arguments.Count);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to spawn the daemon in {Distro}.", _settings.WslDistroName);
+            _machine.UnexpectedExit();
+            PublishState();
+            throw;
+        }
     }
 
     public async Task StopAsync()
@@ -138,24 +163,23 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _logger.LogInformation("Stop requested; state {State}.", State);
         _intentionalExit = true;
         _shutdown.Cancel();
-        if (_process is { HasExited: false })
+
+        var process = _process;
+        _process = null;
+        if (process is not null)
         {
             try
             {
-                _process.Kill(entireProcessTree: true);
-                await _process.WaitForExitAsync();
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
             }
             catch (InvalidOperationException) { }
         }
-        else if (_adoptedPid is int pid)
-        {
-            try { Process.GetProcessById(pid).Kill(entireProcessTree: true); }
-            catch (ArgumentException) { }
-            catch (InvalidOperationException) { }
-        }
-        _process?.Dispose();
-        _process = null;
-        if (_adoptedPid is int adoptedPid && !IsProcessRunning(adoptedPid)) _adoptedPid = null;
+
+        // Killing wsl.exe only ends the client. Terminating the distro is what guarantees the daemon
+        // is gone and that the port is free for the next profile.
+        using var termination = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await _wsl.TerminateAsync(_settings.WslDistroName, termination.Token);
+
         SetLocalControlPairingUrl(null);
         _machine.UserStopped();
         PublishState();
@@ -172,34 +196,24 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     public async Task PollAsync()
     {
         if (_disposed) return;
-        if (_process is { HasExited: true })
+        if (_process is { HasExited: true } process)
         {
             int? exitCode = null;
-            try { exitCode = _process.ExitCode; }
+            try { exitCode = process.ExitCode; }
             catch { }
-            var tail = TakeStderrTail();
-            _process.Dispose();
             _process = null;
             if (_intentionalExit || exitCode != 0) SetLocalControlPairingUrl(null);
             if (_intentionalExit)
             {
-                _logger.LogInformation("Daemon child exited with code {ExitCode} (intentional stop).", exitCode);
+                _logger.LogInformation("Daemon host exited with code {ExitCode} (intentional stop).", exitCode);
                 _machine.UserStopped();
                 PublishState();
             }
             else
             {
-                _logger.LogError("Daemon child exited unexpectedly with code {ExitCode}.{Stderr}", exitCode, FormatTail(tail));
+                _logger.LogError("Daemon host exited unexpectedly with code {ExitCode}.", exitCode);
                 HandleUnexpectedExit();
             }
-            return;
-        }
-
-        if (_adoptedPid is int adoptedPid && !IsProcessRunning(adoptedPid))
-        {
-            _logger.LogError("Adopted daemon pid {Pid} is no longer running.", adoptedPid);
-            _adoptedPid = null;
-            HandleUnexpectedExit();
             return;
         }
 
@@ -223,69 +237,41 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(seconds), cancellationToken);
-            if (!cancellationToken.IsCancellationRequested) Spawn();
+            if (!cancellationToken.IsCancellationRequested) await StartAsync();
         }
         catch (OperationCanceledException) { }
     }
 
-    private void Spawn()
+    // The process abstraction surfaces stdout only, so the daemon's stderr tail that used to be
+    // logged on a crash is gone. Reading stdout keeps the log path capture working.
+    private async Task PumpOutputAsync(IProcess process, CancellationToken cancellationToken)
     {
-        _machine.BeginStart();
-        PublishState();
-        var executable = ExpandPath(_settings.QwenExecutable);
-        var workspace = ResolveWorkspace();
-        foreach (var warning in ValidateSettings(_settings)) _logger.LogWarning("Daemon settings warning: {Warning}", warning);
-        var arguments = BuildArguments(_settings);
-        SetLocalControlPairingUrl(null);
-        _localControlEnableAttempted = false;
-        var command = $"\"{executable}\" " + string.Join(" ", arguments.Select(QuoteArgument));
-        var start = new ProcessStartInfo
-        {
-            FileName = "cmd.exe",
-            Arguments = $"/d /s /c \"{command}\"",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Utf8,
-            StandardErrorEncoding = Utf8
-        };
-        if (workspace is not null)
-        {
-            try
-            {
-                Directory.CreateDirectory(workspace);
-                start.WorkingDirectory = workspace;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not prepare daemon workspace {Workspace}; using the default working directory.", workspace);
-            }
-        }
-        lock (_tailGate) _stderrTail.Clear();
-
-        _process = new Process { StartInfo = start, EnableRaisingEvents = true };
-        _process.OutputDataReceived += OnStdout;
-        _process.ErrorDataReceived += OnStderr;
         try
         {
-            _process.Start();
-            _process.BeginOutputReadLine();
-            _process.BeginErrorReadLine();
-            _logger.LogInformation("Spawned daemon via cmd.exe. Pid={Pid} Workspace={Workspace} BearerAuth={BearerAuth} ArgCount={ArgCount}", _process.Id, start.WorkingDirectory ?? "(default)", _settings.UsesBearerAuth, arguments.Count);
+            while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
+            {
+                if (line.Length == 0) continue;
+                TryCaptureLogPath(line);
+                if (!_settings.LocalControl) _logger.LogDebug("daemon stdout: {Line}", line);
+            }
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException or ObjectDisposedException)
         {
-            _logger.LogError(exception, "Failed to spawn daemon.");
-            _machine.UnexpectedExit();
-            PublishState();
-            throw;
         }
     }
 
-    internal static List<string> BuildArguments(Settings settings)
+    internal static List<string> BuildArguments(Settings settings, string distro, IdentityProfile profile)
     {
-        var args = new List<string> { "serve", "--hostname", settings.Host, "--port", settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        var args = new List<string>
+        {
+            "-d", distro,
+            "-u", profile.LinuxUser,
+            "--",
+            profile.ResolvedQwenExecutable,
+            "serve",
+            "--hostname", settings.Host,
+            "--port", settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
         if (!string.IsNullOrWhiteSpace(settings.Token)) { args.Add("--token"); args.Add(settings.Token.Trim()); }
         if (settings.RequireAuth) args.Add("--require-auth");
         if (settings.EnableSessionShell) args.Add("--enable-session-shell");
@@ -312,6 +298,8 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     internal static IEnumerable<string> ValidateSettings(Settings settings)
     {
         if (string.IsNullOrWhiteSpace(settings.Host)) yield return "Hostname is empty; the daemon refuses to start.";
+        if (string.IsNullOrWhiteSpace(settings.WslDistroName)) yield return "The WSL distro name is empty; the daemon has no host.";
+        if (string.IsNullOrWhiteSpace(settings.ResolveActiveProfile().LinuxUser)) yield return "The active profile has no Linux user.";
         if (settings.LocalControl && !IsLoopbackHost(settings.Host)) yield return "Device pairing requires the main daemon address to be 127.0.0.1.";
         if (settings.LocalControl && !settings.ServeWeb) yield return "Device pairing requires the Web Shell to be enabled.";
         if (settings.LocalControl && settings.ExtraArgs.Any(argument => argument.StartsWith("--hostname", StringComparison.Ordinal))) yield return "Remove the --hostname override from extra arguments to enable device pairing.";
@@ -321,7 +309,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         var hasCert = !string.IsNullOrWhiteSpace(settings.TlsCertPath);
         var hasKey = !string.IsNullOrWhiteSpace(settings.TlsKeyPath);
         if (hasCert != hasKey) yield return "--tls-cert and --tls-key must both be set or both empty.";
-        if (!settings.RateLimit && (settings.ExtraArgs.Any(a => a.StartsWith("--rate-limit-", StringComparison.Ordinal)))) yield return "rate-limit tier flags are present without rate limiting enabled.";
+        if (!settings.RateLimit && settings.ExtraArgs.Any(a => a.StartsWith("--rate-limit-", StringComparison.Ordinal))) yield return "rate-limit tier flags are present without rate limiting enabled.";
     }
 
     private void HandleUnexpectedExit()
@@ -340,26 +328,6 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             _logger.LogWarning("Scheduling restart #{Failures} in {Delay}s.", _machine.ConsecutiveFailures, delay);
             _restartTask = RestartAfterDelayAsync(delay, _shutdown.Token);
         }
-    }
-
-    private void OnStdout(object sender, DataReceivedEventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(e.Data)) return;
-        TryCaptureLogPath(e.Data);
-        if (!_settings.LocalControl) _logger.LogDebug("daemon stdout: {Line}", e.Data);
-    }
-
-    private void OnStderr(object sender, DataReceivedEventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(e.Data)) return;
-        TryCaptureLogPath(e.Data);
-        if (_settings.LocalControl) return;
-        lock (_tailGate)
-        {
-            _stderrTail.Add(e.Data);
-            if (_stderrTail.Count > StderrTailLines) _stderrTail.RemoveAt(0);
-        }
-        _logger.LogDebug("daemon stderr: {Line}", e.Data);
     }
 
     private HttpRequestMessage CreateLocalControlRequest(HttpMethod method, string path)
@@ -414,23 +382,18 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     {
         var match = LogPathRegex.Match(line);
         if (!match.Success) return;
-        var path = match.Groups[1].Value.Trim();
+        var path = ToUncPath(_settings.WslDistroName, match.Groups[1].Value.Trim());
         if (path.Length == 0 || string.Equals(path, _logPath, StringComparison.Ordinal)) return;
         _logPath = path;
         _logger.LogInformation("Daemon reported its log file at {LogPath}.", path);
     }
 
-    private string[] TakeStderrTail()
+    /// <summary>Turns <c>/home/qwen/.qwen/daemon.log</c> into the distro share Windows can open.</summary>
+    internal static string ToUncPath(string distro, string linuxPath)
     {
-        lock (_tailGate)
-        {
-            var snapshot = _stderrTail.ToArray();
-            _stderrTail.Clear();
-            return snapshot;
-        }
+        if (string.IsNullOrWhiteSpace(linuxPath) || linuxPath[0] != '/') return string.Empty;
+        return $@"\\wsl.localhost\{distro}" + linuxPath.Replace('/', '\\');
     }
-
-    private string FormatTail(string[] tail) => tail.Length == 0 || _settings.LocalControl ? string.Empty : " Last stderr output:" + Environment.NewLine + string.Join(Environment.NewLine, tail);
 
     private async Task<bool> IsHealthyAsync()
     {
@@ -442,45 +405,11 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             using var response = await _http.SendAsync(request, _shutdown.Token);
             return response.IsSuccessStatusCode;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException or ObjectDisposedException) 
-        { 
-          return false; 
-        }
-    }
-
-    private static bool IsProcessRunning(int pid)
-    {
-        try { return !Process.GetProcessById(pid).HasExited; }
-        catch (ArgumentException) { return false; }
-    }
-
-    private static async Task<int?> FindListenerPidAsync(int port)
-    {
-        var start = new ProcessStartInfo("netstat.exe", "-ano") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
-        using var process = Process.Start(start);
-        if (process is null) return null;
-        var output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        var portSuffix = ":" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        foreach (var line in output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or OperationCanceledException or ObjectDisposedException)
         {
-            var fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (fields.Length >= 5 && fields[0].Equals("TCP", StringComparison.OrdinalIgnoreCase) && fields[1].EndsWith(portSuffix, StringComparison.Ordinal) && fields[^2].Equals("LISTENING", StringComparison.OrdinalIgnoreCase) && int.TryParse(fields[^1], out var pid))
-                return pid;
+            return false;
         }
-        return null;
     }
-
-    private string? ResolveWorkspace()
-    {
-        var expanded = ExpandPath(_settings.WorkspaceDirectory);
-        return expanded.Length == 0 ? null : expanded;
-    }
-
-    // Paths in settings may use %VARIABLE% so a settings file can move between machines.
-    internal static string ExpandPath(string? value) => Environment.ExpandEnvironmentVariables(value ?? string.Empty).Trim();
-
-    private static string QuoteArgument(string value) => value.Length > 0 && (value.Contains(' ', StringComparison.Ordinal) || value.Contains('"', StringComparison.Ordinal)) ? "\"" + value.Replace("\"", "\\\"") + "\"" : value;
 
     private void PublishState()
     {
@@ -496,8 +425,8 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         _shutdown.Cancel();
-        // The cancel unwinds the backoff delay. Awaiting it keeps a pending restart from
-        // spawning a daemon while the app is exiting.
+        // The cancel unwinds the backoff delay. Awaiting it keeps a pending restart from spawning a
+        // daemon while the app is exiting.
         try
         {
             if (_restartTask is not null) await _restartTask;

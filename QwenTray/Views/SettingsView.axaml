@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:QwenTray.ViewModels"
+             xmlns:local="using:QwenTray"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="900"
@@ -26,31 +27,224 @@
           <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Daemon" />
 
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
               <TextBlock Grid.Row="0" Classes="field" Text="qwen executable" />
-              <TextBox Grid.Row="0" Grid.Column="1"
-                       Text="{Binding QwenExecutable}"
-                       ToolTip.Tip="The launcher that is spawned, usually qwen.cmd." />
-
-              <TextBlock Grid.Row="1" Classes="field" Text="Workspace directory" Margin="0,10,0,0" />
-              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
-                <TextBox Text="{Binding WorkspaceDirectory}" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding QwenExecutable}"
+                         ToolTip.Tip="Absolute Linux path to the qwen launcher in the distro." />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="The daemon opens this folder as its workspace. It is created if it does not exist. Supports %USERPROFILE% and other environment variables." />
+                           Text="The daemon is started through wsl.exe as the active profile's Linux user, so this path is a Linux path." />
               </StackPanel>
 
-              <TextBlock Grid.Row="2" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
-              <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+              <TextBlock Grid.Row="1" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
                 <TextBox Text="{Binding Host}" />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
                            Text="This is the daemon's main address. 127.0.0.1 keeps it on this PC. A LAN address or 0.0.0.0 makes the main daemon reachable from the network and requires a token." />
               </StackPanel>
 
-              <TextBlock Grid.Row="3" Classes="field" Text="Port" Margin="0,10,0,0" />
-              <TextBox Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
+              <TextBlock Grid.Row="2" Classes="field" Text="Port" Margin="0,10,0,0" />
+              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
             </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Installed version" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Classes="field" Text="{Binding QwenVersion}" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Check for updates"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding CheckQwenUpdateCommand}"
+                      IsEnabled="{Binding !IsQwenBusy}" />
+              <Button Content="Update qwen"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding UpdateQwenCommand}"
+                      IsEnabled="{Binding !IsQwenBusy}" />
+            </StackPanel>
+
+            <TextBlock Text="{Binding QwenStatus}"
+                       Classes="caption"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding QwenStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Linux environment" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="WSL distro" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding WslDistroName}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="QwenTray creates and owns this distro. Windows interop and drive mounting are turned off, so the daemon cannot read C: or run Windows binaries." />
+                <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DistroStatus}" />
+              </StackPanel>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Check status"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding RefreshDistroCommand}"
+                      IsEnabled="{Binding !IsDistroBusy}" />
+              <Button Content="Set up distro"
+                      Classes="Primary VariantFilled"
+                      Command="{Binding SetupDistroCommand}"
+                      IsEnabled="{Binding !IsDistroBusy}" />
+              <Button Content="Open in Windows Terminal"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding OpenInWindowsTerminalCommand}" />
+            </StackPanel>
+
+            <TextBlock Classes="h2" Text="Identity profiles" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Active profile" />
+              <ComboBox Grid.Row="0" Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        ItemsSource="{Binding Profiles}"
+                        SelectedItem="{Binding SelectedProfile}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate DataType="local:IdentityProfile">
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Profile name" Margin="0,10,0,0" />
+              <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding ProfileName}" />
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Linux user" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding ProfileLinuxUser}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The Linux user is the identity. Its home directory holds this profile's ssh key, gh token, git config, and Qwen Code configuration." />
+              </StackPanel>
+            </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Workspace directory" />
+              <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ProfileWorkspace}" />
+            </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="New profile name" />
+              <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding NewProfileName}" />
+
+              <TextBlock Grid.Row="1" Classes="field" Text="New profile user" Margin="0,10,0,0" />
+              <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding NewProfileUser}" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Add profile" Classes="Primary VariantOutlined" Command="{Binding AddProfileCommand}" />
+              <Button Content="Remove profile" Classes="Primary VariantOutlined" Command="{Binding RemoveProfileCommand}" />
+            </StackPanel>
+
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="Adding a profile and pressing Set up distro creates the Linux user in the distro. Changing the active profile and saving restarts the daemon as that identity." />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Identity credentials" />
+
+            <TextBlock Classes="field" Text="SSH public key" />
+            <StackPanel Spacing="6">
+              <TextBox Text="{Binding SshPublicKey}"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       MinHeight="48"
+                       FontFamily="Consolas,Menlo,monospace" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Copy public key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding CopySshKeyCommand}"
+                        IsEnabled="{Binding HasSshPublicKey}" />
+                <Button Content="Generate key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding GenerateSshKeyCommand}" />
+                <Button Content="Refresh"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding LoadIdentityCommand}" />
+              </StackPanel>
+              <TextBlock Text="{Binding SshStatus}"
+                         Classes="caption"
+                         TextWrapping="Wrap"
+                         IsVisible="{Binding SshStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+
+            <TextBlock Classes="field" Text="GitHub token" Margin="0,10,0,0" />
+            <StackPanel Spacing="6">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox x:Name="GitHubTokenBox"
+                         Text="{Binding GitHubToken}"
+                         PasswordChar="&#x25CF;" />
+                <ToggleButton Grid.Column="1"
+                              Classes="Icon"
+                              IsChecked="{Binding #GitHubTokenBox.RevealPassword}"
+                              ToolTip.Tip="Show the token"
+                              Margin="4,0,0,0">
+                  <Panel>
+                    <PathIcon Data="{StaticResource eye_off_regular}" />
+                    <PathIcon Data="{StaticResource eye_show_regular}"
+                              IsVisible="{Binding #GitHubTokenBox.RevealPassword}" />
+                  </Panel>
+                </ToggleButton>
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Save token"
+                        Classes="Primary VariantFilled"
+                        Command="{Binding SaveGitHubTokenCommand}"
+                        IsEnabled="{Binding !IsGitHubBusy}" />
+                <Button Content="Sign out"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding SignOutGitHubCommand}"
+                        IsEnabled="{Binding !IsGitHubBusy}" />
+              </StackPanel>
+              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GitHubStatus}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Configuration sync" />
+
+            <TextBlock Classes="field" Text="Entries to sync" />
+            <TextBox Text="{Binding SyncEntries}"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     MinHeight="70"
+                     MaxHeight="200"
+                     FontFamily="Consolas,Menlo,monospace" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="One entry per line, relative to ~/.qwen. settings.json and projects are never synced: settings.json holds per-machine secrets, and projects is keyed by absolute path." />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Push to distro"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding PushConfigCommand}"
+                      IsEnabled="{Binding !IsSyncing}" />
+              <Button Content="Pull from distro"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding PullConfigCommand}"
+                      IsEnabled="{Binding !IsSyncing}" />
+            </StackPanel>
+
+            <TextBlock Text="{Binding SyncStatus}"
+                       Classes="caption"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding SyncStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Border>
 

@@ -9,6 +9,7 @@
     <SelfContained>true</SelfContained>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Bitbound.SystemAbstractions.TestUtilities" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.v3.runner.inproc.console" />
   </ItemGroup>

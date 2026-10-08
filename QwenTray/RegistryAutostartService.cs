@@ -1,8 +1,8 @@
-using Microsoft.Win32;
+using Bitbound.SystemAbstractions.Windows.Registry;
 
 namespace QwenTray;
 
-public sealed class RegistryAutostartService
+public sealed class RegistryAutostartService(IRegistryManager registry)
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "QwenTray";
@@ -13,14 +13,13 @@ public sealed class RegistryAutostartService
     {
         var executable = Environment.ProcessPath;
         if (string.IsNullOrEmpty(executable)) return false;
-        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+        using var key = registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
         return string.Equals(key?.GetValue(ValueName) as string, Quote(executable), StringComparison.OrdinalIgnoreCase);
     }
 
     public void SetEnabled(bool enabled)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true)
-            ?? Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
+        using var key = registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
         if (enabled)
         {
             var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The running executable path could not be determined.");

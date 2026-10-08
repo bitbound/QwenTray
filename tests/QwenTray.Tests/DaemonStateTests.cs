@@ -90,22 +90,58 @@ public sealed class SettingsTests
         var json = System.Text.Json.JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings);
         var restored = System.Text.Json.JsonSerializer.Deserialize(json, QwenTrayJsonContext.Default.Settings);
         Assert.NotNull(restored);
-        Assert.Equal(settings.QwenExecutable, restored.QwenExecutable);
         Assert.Equal(settings.Host, restored.Host);
         Assert.Equal(settings.Port, restored.Port);
         Assert.Equal(settings.HealthPollSeconds, restored.HealthPollSeconds);
         Assert.Equal(settings.AutoRestart, restored.AutoRestart);
         Assert.Equal(settings.MaxBackoffSeconds, restored.MaxBackoffSeconds);
-        Assert.Equal(settings.WorkspaceDirectory, restored.WorkspaceDirectory);
+        Assert.Equal(settings.WslDistroName, restored.WslDistroName);
         Assert.Empty(restored.ExtraArgs);
     }
 
     [Fact]
-    public void WorkspaceDefaultsToUserProfileDocumentsQwen()
+    public void DefaultProfilePathsAreLinuxAndPerUser()
     {
-        var settings = new Settings();
-        Assert.EndsWith(@"Documents\Qwen", settings.WorkspaceDirectory, StringComparison.Ordinal);
-        Assert.Contains("USERPROFILE", settings.WorkspaceDirectory, StringComparison.Ordinal);
+        var profile = Settings.CreateDefaultProfile();
+        Assert.Equal("/home/qwen", profile.HomeDirectory);
+        Assert.Equal("/home/qwen/.local/bin/qwen", profile.ResolvedQwenExecutable);
+        Assert.Equal("/home/qwen/workspace", profile.ResolvedWorkspaceDirectory);
+        Assert.StartsWith("/", profile.ResolvedQwenExecutable, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProfileRoundTripsWithItsIdentities()
+    {
+        var settings = new Settings
+        {
+            ActiveProfileId = "work",
+            Profiles =
+            [
+                new IdentityProfile { Id = "home", Name = "Home", LinuxUser = "home", WorkspaceDirectory = "/home/home/w" },
+                new IdentityProfile { Id = "work", Name = "Work", LinuxUser = "workuser", QwenExecutable = "/opt/qwen/bin/qwen" },
+            ],
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings);
+        var restored = System.Text.Json.JsonSerializer.Deserialize(json, QwenTrayJsonContext.Default.Settings);
+        Assert.NotNull(restored);
+        Assert.Equal(2, restored.Profiles.Length);
+        Assert.Equal("work", restored.ResolveActiveProfile().Id);
+        Assert.Equal("/opt/qwen/bin/qwen", restored.Profiles[1].ResolvedQwenExecutable);
+        Assert.Equal("/home/home/.local/bin/qwen", restored.Profiles[0].ResolvedQwenExecutable);
+    }
+
+    [Fact]
+    public void ResolveActiveProfileFallsBackWhenTheIdIsMissing()
+    {
+        var settings = new Settings
+        {
+            ActiveProfileId = "gone",
+            Profiles = [new IdentityProfile { Id = "only", Name = "Only", LinuxUser = "only" }],
+        };
+        Assert.Equal("only", settings.ResolveActiveProfile().Id);
+
+        var empty = new Settings { ActiveProfileId = "gone" };
+        Assert.Equal("default", empty.ResolveActiveProfile().Id);
     }
 
     [Fact]
@@ -148,16 +184,17 @@ public sealed class SettingsTests
 public sealed class DaemonArgumentsTests
 {
     [Fact]
-    public void DefaultsProduceOnlyTheCoreFlags()
+    public void DefaultsProduceTheWslPrefixThenTheCoreFlags()
     {
-        var args = DaemonSupervisor.BuildArguments(new Settings());
-        Assert.Equal(["serve", "--hostname", "127.0.0.1", "--port", "4170"], args);
+        var settings = new Settings();
+        var args = DaemonSupervisor.BuildArguments(settings, settings.WslDistroName, settings.ResolveActiveProfile());
+        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "--", "/home/qwen/.local/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170"], args);
     }
 
     [Fact]
     public void EveryEnabledOptionBecomesItsFlag()
     {
-        var args = DaemonSupervisor.BuildArguments(new Settings
+        var settings = new Settings
         {
             Token = "tok",
             RequireAuth = true,
@@ -173,7 +210,8 @@ public sealed class DaemonArgumentsTests
             RateLimit = true,
             DebugMode = true,
             ExtraArgs = ["--safe-mode"],
-        });
+        };
+        var args = DaemonSupervisor.BuildArguments(settings, settings.WslDistroName, settings.ResolveActiveProfile());
         Assert.Contains("--token", args);
         Assert.Contains("tok", args);
         Assert.Contains("--require-auth", args);
@@ -262,23 +300,18 @@ public sealed class DaemonArgumentsTests
     }
 
     [Fact]
-    public void DefaultPathsUseEnvironmentVariablesRatherThanAUserProfile()
+    public void ValidationRejectsAnEmptyDistroOrUser()
     {
-        var settings = new Settings();
-        Assert.Contains("%USERPROFILE%", settings.QwenExecutable, StringComparison.Ordinal);
-        Assert.EndsWith(@"AppData\Local\qwen-code\bin\qwen.cmd", settings.QwenExecutable, StringComparison.Ordinal);
-        Assert.DoesNotContain(@"C:\Users\", settings.QwenExecutable, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(@"C:\Users\", settings.WorkspaceDirectory, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(DaemonSupervisor.ValidateSettings(new Settings { WslDistroName = "  " }), w => w.Contains("distro", StringComparison.OrdinalIgnoreCase));
+        var noUser = new Settings { Profiles = [new IdentityProfile { Id = "x", Name = "X", LinuxUser = "  " }] };
+        Assert.Contains(DaemonSupervisor.ValidateSettings(noUser), w => w.Contains("Linux user", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void ExpandPathResolvesEnvironmentVariablesAndLeavesPlainPathsAlone()
+    public void UnixLogPathMapsOntoTheDistroShare()
     {
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var expanded = DaemonSupervisor.ExpandPath(@"%USERPROFILE%\Documents\Qwen");
-        Assert.Equal(Path.Combine(profile, "Documents", "Qwen"), expanded, ignoreCase: true);
-        Assert.Equal(@"D:\somewhere\else", DaemonSupervisor.ExpandPath(@"D:\somewhere\else"));
-        Assert.Equal(string.Empty, DaemonSupervisor.ExpandPath(null));
-        Assert.Equal(string.Empty, DaemonSupervisor.ExpandPath("   "));
+        Assert.Equal(@"\\wsl.localhost\QwenTray\home\qwen\.qwen\daemon.log", DaemonSupervisor.ToUncPath("QwenTray", "/home/qwen/.qwen/daemon.log"));
+        Assert.Equal(string.Empty, DaemonSupervisor.ToUncPath("QwenTray", "relative/path.log"));
+        Assert.Equal(string.Empty, DaemonSupervisor.ToUncPath("QwenTray", "   "));
     }
 }

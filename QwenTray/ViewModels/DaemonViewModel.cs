@@ -1,5 +1,6 @@
-using System.Diagnostics;
 using Avalonia.Threading;
+using Bitbound.SystemAbstractions.FileSystem;
+using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.Logging;
 using QwenTray.Views;
 
@@ -9,6 +10,8 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
 {
     private readonly Settings _settings;
     private readonly DaemonSupervisor _supervisor;
+    private readonly IFileSystem _fileSystem;
+    private readonly IProcessManager _processes;
     private readonly ILogger<DaemonViewModel> _logger;
 
     [ObservableProperty]
@@ -58,10 +61,17 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     [ObservableProperty]
     private string _logPath = "Not reported yet.";
 
-    public DaemonViewModel(Settings settings, DaemonSupervisor supervisor, ILogger<DaemonViewModel> logger)
+    public DaemonViewModel(
+        Settings settings,
+        DaemonSupervisor supervisor,
+        IFileSystem fileSystem,
+        IProcessManager processes,
+        ILogger<DaemonViewModel> logger)
     {
         _settings = settings;
         _supervisor = supervisor;
+        _fileSystem = fileSystem;
+        _processes = processes;
         _logger = logger;
 
         _supervisor.StateChanged += (_, state) => Dispatcher.UIThread.Post(() => ApplyState(state));
@@ -99,20 +109,20 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     [RelayCommand]
     private void OpenWebShell()
     {
-        Process.Start(new ProcessStartInfo(_settings.WebUri.ToString()) { UseShellExecute = true });
+        _processes.LaunchUri(_settings.WebUri);
     }
 
     [RelayCommand]
     private void OpenLog()
     {
         var path = _supervisor.LogPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path) || !_fileSystem.FileExists(path))
         {
             _logger.LogWarning("No daemon log is known yet.");
             return;
         }
 
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        _processes.Start(path, string.Empty, useShellExec: true);
     }
 
     private async Task RunAsync(Func<Task> action)

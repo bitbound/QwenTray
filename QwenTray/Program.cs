@@ -1,4 +1,6 @@
 using Avalonia;
+using Bitbound.SystemAbstractions;
+using Bitbound.SystemAbstractions.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QwenTray.Services;
@@ -25,10 +27,11 @@ internal static class Program
 
         try
         {
-            _services = BuildServices(SettingsStore.Load(), SettingsStore.LogFilePath);
+            _services = BuildServices();
             App.Services = _services;
             var logger = _services.GetRequiredService<ILoggerFactory>().CreateLogger("QwenTray.Program");
-            logger.LogInformation("Starting QwenTray. ProcessId={ProcessId} Executable={Executable} LogFile={LogFile}", Environment.ProcessId, Environment.ProcessPath, SettingsStore.LogFilePath);
+            var settings = _services.GetRequiredService<Settings>();
+            logger.LogInformation("Starting QwenTray. ProcessId={ProcessId} Executable={Executable} LogFile={LogFile} Distro={Distro} Profile={Profile}", Environment.ProcessId, Environment.ProcessPath, SettingsStore.LogFilePath, settings.WslDistroName, settings.ResolveActiveProfile().Name);
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
             logger.LogInformation("QwenTray application lifetime ended.");
         }
@@ -47,15 +50,23 @@ internal static class Program
         }
     }
 
-    internal static ServiceProvider BuildServices(Settings settings, string logFilePath)
+    internal static ServiceProvider BuildServices()
     {
         var services = new ServiceCollection();
-        services.AddLogging(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Information);
-            builder.AddProvider(new FileLoggerProvider(logFilePath));
-        });
-        services.AddSingleton(settings);
+        services.AddSystemAbstractions();
+        services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Information));
+        services.AddSingleton<FileLoggerProvider>(provider => new FileLoggerProvider(provider.GetRequiredService<IFileSystem>(), SettingsStore.LogFilePath));
+        services.AddSingleton<ILoggerProvider>(provider => provider.GetRequiredService<FileLoggerProvider>());
+
+        // Settings are read once on first use, which keeps the load off the container-building path.
+        services.AddSingleton<SettingsStore>();
+        services.AddSingleton(provider => provider.GetRequiredService<SettingsStore>().Load());
+
+        services.AddSingleton<WslDistro>();
+        services.AddSingleton<IWslDistro>(provider => provider.GetRequiredService<WslDistro>());
+        services.AddSingleton<WslDistroProvisioner>();
+        services.AddSingleton<IdentityService>();
+        services.AddSingleton<WslConfigSyncService>();
         services.AddSingleton<RegistryAutostartService>();
         services.AddSingleton<DaemonSupervisor>();
         services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();

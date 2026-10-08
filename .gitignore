@@ -397,3 +397,6 @@ FodyWeavers.xsd
 
 # .NET publish output
 out/
+
+# Local planning documents (never part of a commit)
+.plans/

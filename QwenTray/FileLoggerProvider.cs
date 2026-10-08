@@ -1,3 +1,4 @@
+using Bitbound.SystemAbstractions.FileSystem;
 using Microsoft.Extensions.Logging;
 using System.Text;
 using System.Text.Json;
@@ -8,14 +9,16 @@ public sealed class FileLoggerProvider : ILoggerProvider
 {
     private const long MaxFileBytes = 5 * 1024 * 1024;
     private const int RetainedFiles = 3;
+    private readonly IFileSystem _fileSystem;
     private readonly string _path;
     private readonly object _gate = new();
     private bool _disposed;
 
-    public FileLoggerProvider(string path)
+    public FileLoggerProvider(IFileSystem fileSystem, string path)
     {
+        _fileSystem = fileSystem;
         _path = path;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        _fileSystem.CreateDirectory(Path.GetDirectoryName(path)!);
     }
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(this, categoryName);
@@ -34,24 +37,33 @@ public sealed class FileLoggerProvider : ILoggerProvider
         var line = $"{DateTimeOffset.Now:O} [{Abbreviation(level)}] {category} EventId={eventId.Id} {message}";
         if (properties is { Count: > 0 }) line += " " + JsonSerializer.Serialize(properties);
         if (exception is not null) line += Environment.NewLine + exception;
+        var bytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
 
         lock (_gate)
         {
             if (_disposed) return;
-            RotateIfNeeded(Encoding.UTF8.GetByteCount(line) + Environment.NewLine.Length);
-            File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8);
+            RotateIfNeeded(bytes.Length);
+            using var stream = _fileSystem.OpenFileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read);
+            stream.Write(bytes, 0, bytes.Length);
         }
     }
 
     private void RotateIfNeeded(int incomingBytes)
     {
-        if (!File.Exists(_path) || new FileInfo(_path).Length + incomingBytes <= MaxFileBytes) return;
+        if (GetLength(_path) + incomingBytes <= MaxFileBytes) return;
         for (var i = RetainedFiles - 1; i >= 1; i--)
         {
             var source = $"{_path}.{i}";
-            if (File.Exists(source)) File.Move(source, $"{_path}.{i + 1}", overwrite: true);
+            if (_fileSystem.FileExists(source)) _fileSystem.MoveFile(source, $"{_path}.{i + 1}", overwrite: true);
         }
-        File.Move(_path, $"{_path}.1", overwrite: true);
+        _fileSystem.MoveFile(_path, $"{_path}.1", overwrite: true);
+    }
+
+    private long GetLength(string path)
+    {
+        if (!_fileSystem.FileExists(path)) return 0;
+        using var stream = _fileSystem.OpenFileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return stream.Length;
     }
 
     private static string Abbreviation(LogLevel level) => level switch

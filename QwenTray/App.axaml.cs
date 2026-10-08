@@ -5,9 +5,9 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using QwenTray.Services;
 using QwenTray.ViewModels;
 using QwenTray.Views;
@@ -18,11 +18,12 @@ public partial class App : Application
 {
     public static IServiceProvider? Services { get; set; }
 
-    private DaemonSupervisor? _supervisor;
-    private Settings? _settings;
-    private RegistryAutostartService _autostart = new();
-    private INavigationProvider? _navigation;
-    private ILogger<App> _logger = NullLogger<App>.Instance;
+    private DaemonSupervisor _supervisor = null!;
+    private Settings _settings = null!;
+    private RegistryAutostartService _autostart = null!;
+    private IProcessManager _processes = null!;
+    private INavigationProvider _navigation = null!;
+    private ILogger<App> _logger = null!;
     private TrayIcon? _icon;
     private MainWindow? _mainWindow;
     private IMainWindowViewModel? _mainViewModel;
@@ -44,19 +45,20 @@ public partial class App : Application
             desktop.Exit += OnExit;
         }
 
-        var services = Services;
-        _settings = services?.GetService<Settings>() ?? SettingsStore.Load();
-        _logger = services?.GetService<ILogger<App>>() ?? NullLogger<App>.Instance;
-        _autostart = services?.GetService<RegistryAutostartService>() ?? new RegistryAutostartService();
-        _supervisor = services?.GetService<DaemonSupervisor>() ?? new DaemonSupervisor(_settings);
-        _navigation = services?.GetService<INavigationProvider>();
+        var services = Services ?? throw new InvalidOperationException("The service container was not initialized before the UI started.");
+        _settings = services.GetRequiredService<Settings>();
+        _logger = services.GetRequiredService<ILogger<App>>();
+        _autostart = services.GetRequiredService<RegistryAutostartService>();
+        _supervisor = services.GetRequiredService<DaemonSupervisor>();
+        _processes = services.GetRequiredService<IProcessManager>();
+        _navigation = services.GetRequiredService<INavigationProvider>();
         _supervisor.StateChanged += OnStateChanged;
         _autostart.Changed += OnAutostartChanged;
         _icon = GetValue(TrayIcon.IconsProperty)?.FirstOrDefault();
         UpdateTrayCommandAvailability(_supervisor.State);
         SetAutostartMenuChecked();
 
-        if (services?.GetService<MainWindow>() is { } mainWindow && services.GetService<IMainWindowViewModel>() is { } mainViewModel)
+        if (services.GetRequiredService<MainWindow>() is { } mainWindow && services.GetRequiredService<IMainWindowViewModel>() is { } mainViewModel)
         {
             _mainWindow = mainWindow;
             _mainViewModel = mainViewModel;
@@ -74,7 +76,7 @@ public partial class App : Application
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(pollSeconds) };
         _timer.Tick += async (_, _) => await _supervisor.PollAsync();
         _timer.Start();
-        _logger.LogInformation("QwenTray tray ready. Executable={Executable} HealthUri={HealthUri} PollSeconds={PollSeconds}", _settings.QwenExecutable, _settings.HealthUri, pollSeconds);
+        _logger.LogInformation("QwenTray tray ready. Distro={Distro} Profile={Profile} HealthUri={HealthUri} PollSeconds={PollSeconds}", _settings.WslDistroName, _settings.ResolveActiveProfile().Name, _settings.HealthUri, pollSeconds);
         _ = _supervisor.StartAsync();
         base.OnFrameworkInitializationCompleted();
     }
@@ -100,7 +102,6 @@ public partial class App : Application
     private async Task RunTrayCommandAsync(Func<DaemonSupervisor, Task> command)
     {
         var supervisor = _supervisor;
-        if (supervisor is null) return;
         _daemonCommandBusy = true;
         UpdateTrayCommandAvailability(supervisor.State);
         try
@@ -117,32 +118,27 @@ public partial class App : Application
     private void OnOpenWeb(object? sender, EventArgs e)
     {
         ResetMenuItem(sender);
-        if (_settings is null) return;
         _logger.LogInformation("Opening web shell at {WebUri}", _settings.WebUri);
-        Process.Start(new ProcessStartInfo(_settings.WebUri.ToString()) { UseShellExecute = true });
+        _processes.LaunchUri(_settings.WebUri);
     }
 
     private void OnOpenLog(object? sender, EventArgs e)
     {
         ResetMenuItem(sender);
-        var path = _supervisor?.LogPath;
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".qwen", "debug", "daemon", "runs");
-            if (Directory.Exists(root)) path = Directory.GetFiles(root, "*", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
-        }
+        var path = _supervisor.LogPath;
         if (string.IsNullOrWhiteSpace(path))
         {
             _logger.LogWarning("No daemon log found to open.");
             return;
         }
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+
+        _processes.Start(path, string.Empty, useShellExec: true);
     }
 
     private void OnOpenSettings(object? sender, EventArgs e)
     {
         ResetMenuItem(sender);
-        _ = _navigation?.NavigateTo<SettingsViewModel>();
+        _ = _navigation.NavigateTo<SettingsViewModel>();
         ShowMainWindow();
     }
 

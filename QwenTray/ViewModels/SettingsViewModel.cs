@@ -1,6 +1,13 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Bitbound.SystemAbstractions.FileSystem;
+using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.Logging;
 using QRCoder;
 using QwenTray.Services;
@@ -10,17 +17,91 @@ namespace QwenTray.ViewModels;
 
 public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 {
+    private static readonly Regex LinuxUserName = new("^[a-z_][a-z0-9_-]{0,31}$", RegexOptions.Compiled);
+
     private readonly Settings _settings;
+    private readonly SettingsStore _settingsStore;
     private readonly DaemonSupervisor _supervisor;
     private readonly RegistryAutostartService _autostart;
     private readonly ICertificateTrustService _certTrust;
+    private readonly IWslDistro _wsl;
+    private readonly WslDistroProvisioner _provisioner;
+    private readonly IdentityService _identity;
+    private readonly WslConfigSyncService _sync;
+    private readonly IFileSystem _fileSystem;
+    private readonly IProcessManager _processes;
     private readonly ILogger<SettingsViewModel> _logger;
 
     [ObservableProperty]
-    private string _qwenExecutable = string.Empty;
+    private string _wslDistroName = string.Empty;
+
+    public ObservableCollection<IdentityProfile> Profiles { get; } = [];
 
     [ObservableProperty]
-    private string _workspaceDirectory = string.Empty;
+    private IdentityProfile? _selectedProfile;
+
+    [ObservableProperty]
+    private string _newProfileName = string.Empty;
+
+    [ObservableProperty]
+    private string _newProfileUser = string.Empty;
+
+    [ObservableProperty]
+    private string _profileName = string.Empty;
+
+    [ObservableProperty]
+    private string _profileLinuxUser = string.Empty;
+
+    [ObservableProperty]
+    private string _profileWorkspace = string.Empty;
+
+    [ObservableProperty]
+    private string _distroStatus = "Not checked yet.";
+
+    [ObservableProperty]
+    private bool _isDistroProvisioned;
+
+    [ObservableProperty]
+    private bool _isDistroBusy;
+
+    [ObservableProperty]
+    private string _qwenVersion = "Unknown";
+
+    [ObservableProperty]
+    private bool _isQwenBusy;
+
+    [ObservableProperty]
+    private string? _qwenStatus;
+
+    [ObservableProperty]
+    private string _sshPublicKey = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasSshPublicKey;
+
+    [ObservableProperty]
+    private string? _sshStatus;
+
+    [ObservableProperty]
+    private string _gitHubToken = string.Empty;
+
+    [ObservableProperty]
+    private string _gitHubStatus = "Unknown";
+
+    [ObservableProperty]
+    private bool _isGitHubBusy;
+
+    [ObservableProperty]
+    private string _syncEntries = string.Empty;
+
+    [ObservableProperty]
+    private string? _syncStatus;
+
+    [ObservableProperty]
+    private bool _isSyncing;
+
+    [ObservableProperty]
+    private string _qwenExecutable = string.Empty;
 
     [ObservableProperty]
     private string _host = string.Empty;
@@ -120,15 +201,29 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     public SettingsViewModel(
         Settings settings,
+        SettingsStore settingsStore,
         DaemonSupervisor supervisor,
         RegistryAutostartService autostart,
         ICertificateTrustService certTrust,
+        IWslDistro wsl,
+        WslDistroProvisioner provisioner,
+        IdentityService identity,
+        WslConfigSyncService sync,
+        IFileSystem fileSystem,
+        IProcessManager processes,
         ILogger<SettingsViewModel> logger)
     {
         _settings = settings;
+        _settingsStore = settingsStore;
         _supervisor = supervisor;
         _autostart = autostart;
         _certTrust = certTrust;
+        _wsl = wsl;
+        _provisioner = provisioner;
+        _identity = identity;
+        _sync = sync;
+        _fileSystem = fileSystem;
+        _processes = processes;
         _logger = logger;
         _supervisor.LocalControlPairingUrlChanged += OnLocalControlPairingUrlChanged;
     }
@@ -139,8 +234,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     protected override Task OnInitializeAsync()
     {
-        QwenExecutable = _settings.QwenExecutable;
-        WorkspaceDirectory = _settings.WorkspaceDirectory;
+        WslDistroName = _settings.WslDistroName;
+        LoadProfiles();
+        QwenExecutable = _settings.ResolveActiveProfile().ResolvedQwenExecutable;
         Host = _settings.Host;
         Port = _settings.Port.ToString();
         Token = _settings.Token;
@@ -160,6 +256,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         AutoRestart = _settings.AutoRestart;
         MaxBackoffSeconds = _settings.MaxBackoffSeconds.ToString();
         ExtraArgs = string.Join(Environment.NewLine, _settings.ExtraArgs);
+        SyncEntries = string.Join(Environment.NewLine, EffectiveSyncPaths());
         StartOnLogin = _autostart.IsEnabled();
         UpdateLocalControlPairing(_supervisor.LocalControlPairingUrl);
         RefreshPublisherTrustState();
@@ -198,8 +295,29 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             return;
         }
 
-        _settings.QwenExecutable = QwenExecutable.Trim();
-        _settings.WorkspaceDirectory = WorkspaceDirectory.Trim();
+        if (string.IsNullOrWhiteSpace(WslDistroName))
+        {
+            SaveError = "The WSL distro name cannot be empty.";
+            return;
+        }
+
+        CommitProfileEdits();
+        if (Profiles.Count == 0)
+        {
+            SaveError = "Add at least one identity profile.";
+            return;
+        }
+
+        var duplicate = Profiles.GroupBy(profile => profile.LinuxUser, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+        {
+            SaveError = $"Two profiles both use the Linux user \"{duplicate.Key}\". Each identity needs its own user.";
+            return;
+        }
+
+        _settings.WslDistroName = WslDistroName.Trim();
+        _settings.Profiles = [.. Profiles];
+        _settings.ActiveProfileId = SelectedProfile?.Id ?? Profiles[0].Id;
         _settings.Host = Host.Trim();
         _settings.Port = port;
         _settings.Token = Token.Trim();
@@ -220,10 +338,11 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _settings.AutoRestart = AutoRestart;
         _settings.MaxBackoffSeconds = Math.Max(1, ParseInt(MaxBackoffSeconds, _settings.MaxBackoffSeconds));
         _settings.ExtraArgs = SplitLines(ExtraArgs);
+        _settings.SyncPaths = SplitLines(SyncEntries);
 
         try
         {
-            SettingsStore.Save(_settings);
+            _settingsStore.Save(_settings);
         }
         catch (Exception ex)
         {
@@ -238,7 +357,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             _logger.LogInformation("Start with Windows {State}.", StartOnLogin ? "enabled" : "disabled");
         }
 
-        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl}.", DaemonSupervisor.BuildArguments(_settings).Count, _settings.LocalControl);
+        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl}.", DaemonSupervisor.BuildArguments(_settings, _settings.WslDistroName, _settings.ResolveActiveProfile()).Count, _settings.LocalControl);
 
         var warnings = DaemonSupervisor.ValidateSettings(_settings).ToList();
         foreach (var warning in warnings)
@@ -262,6 +381,356 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         }
 
         ScheduleSaveMessageFadeOut();
+    }
+
+    [RelayCommand]
+    private async Task RefreshDistroAsync()
+    {
+        IsDistroBusy = true;
+        try
+        {
+            var distro = WslDistroName.Trim();
+            var exists = await _wsl.DistroExistsAsync(distro, CancellationToken.None);
+            if (!exists)
+            {
+                DistroStatus = $"The \"{distro}\" distro does not exist yet. Choose Set up distro to create it.";
+                IsDistroProvisioned = false;
+                return;
+            }
+
+            IsDistroProvisioned = await _provisioner.IsProvisionedAsync(distro, CancellationToken.None);
+            DistroStatus = IsDistroProvisioned ? $"The \"{distro}\" distro is set up." : $"The \"{distro}\" distro exists but is not set up.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Checking the distro failed.");
+            DistroStatus = $"Could not check the distro: {ex.Message}";
+            IsDistroProvisioned = false;
+        }
+        finally
+        {
+            IsDistroBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SetupDistroAsync()
+    {
+        var distro = WslDistroName.Trim();
+        if (string.IsNullOrWhiteSpace(distro))
+        {
+            SaveError = "Set the WSL distro name first.";
+            return;
+        }
+
+        CommitProfileEdits();
+        _settings.Profiles = [.. Profiles];
+        IsDistroBusy = true;
+        QwenStatus = "Creating the distro and installing qwen and gh. This takes a few minutes on first run.";
+        try
+        {
+            _provisioner.WriteWslConfig();
+            await _provisioner.ProvisionAsync(distro, _settings.Profiles, CancellationToken.None);
+            var resolved = await _provisioner.ResolveQwenPathAsync(distro, _settings.ResolveActiveProfile(), CancellationToken.None);
+            if (resolved is not null) _settings.ResolveActiveProfile().QwenExecutable = resolved;
+            IsDistroProvisioned = true;
+            DistroStatus = $"The \"{distro}\" distro is set up.";
+            QwenStatus = "Setup complete. Sign in to Windows again or run 'wsl --shutdown' so the mirrored networking change takes effect.";
+            _settingsStore.Save(_settings);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Provisioning failed.");
+            QwenStatus = $"Setup failed: {ex.Message}";
+        }
+        finally
+        {
+            IsDistroBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenInWindowsTerminal()
+    {
+        var distro = WslDistroName.Trim();
+        var profile = _settings.ResolveActiveProfile();
+        try
+        {
+            _processes.Start("wt.exe", $"wsl.exe -d {distro} -u {profile.LinuxUser}", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Windows Terminal could not be started; falling back to wsl.exe.");
+            _processes.Start("wsl.exe", $"-d {distro} -u {profile.LinuxUser}", useShellExec: true);
+        }
+    }
+
+    [RelayCommand]
+    private void AddProfile()
+    {
+        var name = string.IsNullOrWhiteSpace(NewProfileName) ? $"Profile {Profiles.Count + 1}" : NewProfileName.Trim();
+        var user = string.IsNullOrWhiteSpace(NewProfileUser) ? SlugifyLinuxUser(name) : NewProfileUser.Trim().ToLowerInvariant();
+        if (!IsValidLinuxUser(user))
+        {
+            SaveError = $"\"{user}\" is not a valid Linux user name. Use lowercase letters, digits, underscore, or hyphen, and start with a letter.";
+            return;
+        }
+        if (Profiles.Any(profile => string.Equals(profile.LinuxUser, user, StringComparison.Ordinal)))
+        {
+            SaveError = $"A profile already uses the Linux user \"{user}\".";
+            return;
+        }
+
+        var id = SlugifyLinuxUser(name);
+        if (Profiles.Any(profile => string.Equals(profile.Id, id, StringComparison.Ordinal))) id = $"{id}-{Profiles.Count + 1}";
+        var created = new IdentityProfile { Id = id, Name = name, LinuxUser = user, WorkspaceDirectory = $"/home/{user}/workspace" };
+        Profiles.Add(created);
+        SelectedProfile = created;
+        NewProfileName = string.Empty;
+        NewProfileUser = string.Empty;
+    }
+
+    [RelayCommand]
+    private void RemoveProfile()
+    {
+        if (SelectedProfile is null) return;
+        if (Profiles.Count <= 1)
+        {
+            SaveError = "At least one profile is required.";
+            return;
+        }
+
+        var index = Profiles.IndexOf(SelectedProfile);
+        Profiles.Remove(SelectedProfile);
+        SelectedProfile = Profiles[Math.Clamp(index, 0, Profiles.Count - 1)];
+    }
+
+    [RelayCommand]
+    private async Task CheckQwenUpdateAsync()
+    {
+        IsQwenBusy = true;
+        try
+        {
+            var distro = WslDistroName.Trim();
+            CommitProfileEdits();
+            var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+            var installed = await _provisioner.ReadQwenVersionAsync(distro, profile, QwenExecutable.Trim(), CancellationToken.None);
+            QwenVersion = installed ?? "Unknown";
+            var latest = await ReadLatestQwenVersionAsync(distro, profile);
+            QwenStatus = installed is null
+                ? "qwen is not installed in this profile yet. Choose Update qwen to install it."
+                : latest is null
+                    ? $"Installed version {installed}. Latest version could not be determined."
+                    : string.Equals(installed, latest, StringComparison.Ordinal) ? $"Installed version {installed} is up to date." : $"Installed {installed}, latest {latest}.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Checking the qwen version failed.");
+            QwenStatus = $"Could not check for updates: {ex.Message}";
+        }
+        finally
+        {
+            IsQwenBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task UpdateQwenAsync()
+    {
+        IsQwenBusy = true;
+        QwenStatus = null;
+        try
+        {
+            var distro = WslDistroName.Trim();
+            CommitProfileEdits();
+            var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+            var result = await _provisioner.InstallOrUpdateQwenAsync(distro, profile, CancellationToken.None);
+            if (!result.Succeeded)
+            {
+                QwenStatus = $"Updating qwen failed: {result.Output}";
+                return;
+            }
+
+            var resolved = await _provisioner.ResolveQwenPathAsync(distro, profile, CancellationToken.None);
+            if (resolved is not null) { profile.QwenExecutable = resolved; QwenExecutable = resolved; }
+            QwenVersion = await _provisioner.ReadQwenVersionAsync(distro, profile, QwenExecutable.Trim(), CancellationToken.None) ?? "Unknown";
+            QwenStatus = $"qwen is now version {QwenVersion}.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Updating qwen failed.");
+            QwenStatus = $"Updating qwen failed: {ex.Message}";
+        }
+        finally
+        {
+            IsQwenBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task LoadIdentityAsync()
+    {
+        var distro = WslDistroName.Trim();
+        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        try
+        {
+            SshPublicKey = await _identity.ReadPublicKeyAsync(distro, profile, CancellationToken.None) ?? string.Empty;
+            HasSshPublicKey = SshPublicKey.Length > 0;
+            SshStatus = HasSshPublicKey ? null : "No ssh key yet for this profile. Choose Generate key.";
+            var status = await _identity.GetGitHubAuthStatusAsync(distro, profile, CancellationToken.None);
+            GitHubStatus = status.IsAuthenticated ? $"Signed in as {status.Account}." : "Not signed in.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Reading the identity for {Profile} failed.", profile.Name);
+            SshStatus = $"Could not read the identity: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task GenerateSshKeyAsync()
+    {
+        var distro = WslDistroName.Trim();
+        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        try
+        {
+            await _identity.EnsureSshKeyAsync(distro, profile, CancellationToken.None);
+            await LoadIdentityAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Generating the ssh key failed.");
+            SshStatus = $"Could not generate the ssh key: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopySshKeyAsync()
+    {
+        if (!HasSshPublicKey) return;
+        var clipboard = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow?.Clipboard;
+        if (clipboard is null) return;
+        await clipboard.SetTextAsync(SshPublicKey);
+        SshStatus = "Public key copied to the clipboard.";
+    }
+
+    [RelayCommand]
+    private async Task SaveGitHubTokenAsync()
+    {
+        if (string.IsNullOrWhiteSpace(GitHubToken))
+        {
+            GitHubStatus = "Paste a token first.";
+            return;
+        }
+
+        var distro = WslDistroName.Trim();
+        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        IsGitHubBusy = true;
+        try
+        {
+            await _identity.SetGitHubTokenAsync(distro, profile, GitHubToken, CancellationToken.None);
+            GitHubToken = string.Empty;
+            var status = await _identity.GetGitHubAuthStatusAsync(distro, profile, CancellationToken.None);
+            GitHubStatus = status.IsAuthenticated ? $"Signed in as {status.Account}." : "The token was stored but gh did not report a signed-in account.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Storing the GitHub token failed.");
+            GitHubStatus = $"Could not store the token: {ex.Message}";
+        }
+        finally
+        {
+            IsGitHubBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SignOutGitHubAsync()
+    {
+        var distro = WslDistroName.Trim();
+        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        IsGitHubBusy = true;
+        try
+        {
+            await _identity.ClearGitHubTokenAsync(distro, profile, CancellationToken.None);
+            GitHubStatus = "Signed out.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Signing out of GitHub failed.");
+            GitHubStatus = $"Could not sign out: {ex.Message}";
+        }
+        finally
+        {
+            IsGitHubBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task PushConfigAsync() => await SyncConfigAsync(push: true);
+
+    [RelayCommand]
+    private async Task PullConfigAsync() => await SyncConfigAsync(push: false);
+
+    private async Task SyncConfigAsync(bool push)
+    {
+        var distro = WslDistroName.Trim();
+        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        var entries = SplitLines(SyncEntries);
+        IsSyncing = true;
+        SyncStatus = null;
+        try
+        {
+            var result = push
+                ? await _sync.PushAsync(distro, profile, entries, CancellationToken.None)
+                : await _sync.PullAsync(distro, profile, entries, CancellationToken.None);
+            var skipped = result.Skipped.Length > 0 ? $" Skipped: {string.Join(", ", result.Skipped)}." : string.Empty;
+            SyncStatus = $"{(push ? "Pushed" : "Pulled")} {result.FilesCopied} file(s) {(push ? "to" : "from")} {profile.Name}.{skipped}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Syncing the Qwen configuration failed.");
+            SyncStatus = $"Sync failed: {ex.Message}";
+        }
+        finally
+        {
+            IsSyncing = false;
+        }
+    }
+
+    private async Task<string?> ReadLatestQwenVersionAsync(string distro, IdentityProfile profile)
+    {
+        var result = await _wsl.RunScriptAsync(distro, profile.LinuxUser, "npm view @qwen-code/qwen-code version 2>/dev/null", CancellationToken.None);
+        return result.Succeeded ? WslDistro.ParseVersion(result.Output) : null;
+    }
+
+    private void LoadProfiles()
+    {
+        Profiles.Clear();
+        if (_settings.Profiles.Length == 0) _settings.Profiles = [Settings.CreateDefaultProfile()];
+        foreach (var profile in _settings.Profiles) Profiles.Add(profile);
+        SelectedProfile = _settings.ResolveActiveProfile();
+    }
+
+    private void CommitProfileEdits()
+    {
+        if (SelectedProfile is null) return;
+        var name = ProfileName.Trim();
+        var user = ProfileLinuxUser.Trim().ToLowerInvariant();
+        var qwen = QwenExecutable.Trim();
+        if (name.Length > 0) SelectedProfile.Name = name;
+        if (user.Length > 0) SelectedProfile.LinuxUser = user;
+        if (ProfileWorkspace.Trim().Length > 0) SelectedProfile.WorkspaceDirectory = ProfileWorkspace.Trim();
+        if (qwen.Length > 0) SelectedProfile.QwenExecutable = qwen;
+    }
+
+    partial void OnSelectedProfileChanged(IdentityProfile? value)
+    {
+        if (value is null) return;
+        ProfileName = value.Name;
+        ProfileLinuxUser = value.LinuxUser;
+        ProfileWorkspace = value.WorkspaceDirectory;
+        QwenExecutable = value.ResolvedQwenExecutable;
     }
 
     private void ScheduleSaveMessageFadeOut()
@@ -328,13 +797,13 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private void OpenLogFile()
     {
         var path = _supervisor.LogPath;
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path) || !_fileSystem.FileExists(path))
         {
             SaveWarning = "No daemon log is known yet. The path is captured once the daemon starts.";
             return;
         }
 
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        _processes.Start(path, string.Empty, useShellExec: true);
     }
 
     private void OnLocalControlPairingUrlChanged(object? sender, EventArgs e)
@@ -367,8 +836,21 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         }
     }
 
+    private string[] EffectiveSyncPaths() => _settings.SyncPaths.Length > 0 ? _settings.SyncPaths : Settings.DefaultSyncPaths;
+
     private static int ParseInt(string? text, int fallback) => int.TryParse((text ?? string.Empty).Trim(), out var value) ? value : fallback;
 
     private static string[] SplitLines(string? text) =>
         (text ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>Linux user names are lowercase and may not start with a digit or hyphen.</summary>
+    internal static bool IsValidLinuxUser(string user) => LinuxUserName.IsMatch(user);
+
+    internal static string SlugifyLinuxUser(string value)
+    {
+        var lowered = value.Trim().ToLowerInvariant();
+        var cleaned = new string([.. lowered.Select(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' ? character : '_')]);
+        if (cleaned.Length == 0 || (!char.IsAsciiLetter(cleaned[0]) && cleaned[0] != '_')) cleaned = "user" + cleaned;
+        return cleaned.Length > 32 ? cleaned[..32] : cleaned;
+    }
 }
