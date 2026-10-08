@@ -17,7 +17,7 @@ namespace QwenTray.ViewModels;
 
 public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 {
-    private static readonly Regex LinuxUserName = new("^[a-z_][a-z0-9_-]{0,31}$", RegexOptions.Compiled);
+    private static readonly Regex DistroName = new("^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
 
     private readonly Settings _settings;
     private readonly SettingsStore _settingsStore;
@@ -301,10 +301,26 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             return;
         }
 
+        var distroName = WslDistroName.Trim();
+        if (!IsSafeDistroName(distroName))
+        {
+            SaveError = "The WSL distro name may only contain letters, digits, dot, underscore, and hyphen.";
+            return;
+        }
+
         CommitProfileEdits();
         if (Profiles.Count == 0)
         {
             SaveError = "Add at least one identity profile.";
+            return;
+        }
+
+        // The user name and directory reach root shell scripts, so reject anything unsafe before it is
+        // persisted or handed to the provisioner.
+        var unsafeProfile = Profiles.FirstOrDefault(profile => !profile.IsShellSafe);
+        if (unsafeProfile is not null)
+        {
+            SaveError = $"The \"{unsafeProfile.Name}\" profile has a Linux user or directory that is not allowed. Use a lowercase user name and a plain absolute path.";
             return;
         }
 
@@ -315,7 +331,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             return;
         }
 
-        _settings.WslDistroName = WslDistroName.Trim();
+        _settings.WslDistroName = distroName;
         _settings.Profiles = [.. Profiles];
         _settings.ActiveProfileId = SelectedProfile?.Id ?? Profiles[0].Id;
         _settings.Host = Host.Trim();
@@ -454,6 +470,13 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     {
         var distro = WslDistroName.Trim();
         var profile = _settings.ResolveActiveProfile();
+        if (!IsSafeDistroName(distro) || !IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
+        {
+            _logger.LogWarning("Cannot open a terminal for distro {Distro} and user {User}: the names are not valid.", distro, profile.LinuxUser);
+            DistroStatus = "Fix the distro name or Linux user before opening a terminal.";
+            return;
+        }
+
         try
         {
             _processes.Start("wt.exe", $"wsl.exe -d {distro} -u {profile.LinuxUser}", useShellExec: true);
@@ -844,7 +867,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         (text ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>Linux user names are lowercase and may not start with a digit or hyphen.</summary>
-    internal static bool IsValidLinuxUser(string user) => LinuxUserName.IsMatch(user);
+    internal static bool IsValidLinuxUser(string user) => IdentityProfile.IsValidLinuxUser(user);
+
+    internal static bool IsSafeDistroName(string name) => DistroName.IsMatch(name);
 
     internal static string SlugifyLinuxUser(string value)
     {

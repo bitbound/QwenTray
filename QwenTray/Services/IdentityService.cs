@@ -1,4 +1,3 @@
-using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace QwenTray.Services;
@@ -21,7 +20,7 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
 
     public async Task<string?> ReadPublicKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {
-        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, $"{SshKeyPath}.pub", cancellationToken);
+        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, $"cat {SshKeyPath}.pub", cancellationToken);
         if (!result.Succeeded) return null;
         var key = result.Output.Trim();
         return key.StartsWith("ssh-", StringComparison.Ordinal) ? key : null;
@@ -29,7 +28,7 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
 
     public async Task SetGitHubTokenAsync(string distro, IdentityProfile profile, string token, CancellationToken cancellationToken)
     {
-        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildGitHubTokenScript(token), cancellationToken);
+        var result = await wsl.RunScriptWithInputAsync(distro, profile.LinuxUser, BuildGitHubTokenScript(), token.Trim(), cancellationToken);
         if (!result.Succeeded) throw new InvalidOperationException($"Could not store the GitHub token for {profile.Name}. {result.Output}");
         logger.LogInformation("Stored a GitHub token for profile {Profile}.", profile.Name);
     }
@@ -49,9 +48,9 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     internal static string BuildEnsureSshKeyScript() =>
         $"test -f {SshKeyPath} || (mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -t ed25519 -N '' -C qwentray -f {SshKeyPath} >/dev/null && chmod 600 {SshKeyPath})";
 
-    /// <summary>Feeds the token over stdin so it never lands in a command line or the process list.</summary>
-    internal static string BuildGitHubTokenScript(string token)
-        => $"printf %s {Convert.ToBase64String(Encoding.UTF8.GetBytes(token.Trim()))} | base64 -d | gh auth login --hostname github.com --with-token";
+    /// <summary>Reads the token from stdin so it never appears on a command line or in a process list.</summary>
+    internal static string BuildGitHubTokenScript()
+        => "gh auth login --hostname github.com --with-token";
 
     /// <summary>
     /// gh prints "Logged in to github.com account NAME" when a token is valid, and writes an error and

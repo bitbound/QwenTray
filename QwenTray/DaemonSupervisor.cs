@@ -10,6 +10,9 @@ namespace QwenTray;
 
 public sealed class DaemonSupervisor : IAsyncDisposable
 {
+    // Health polls an adopted daemon may miss before it is treated as dead and restarted.
+    private const int AdoptedMissesBeforeCrash = 3;
+
     private static readonly Regex LogPathRegex = new(@"daemon log\s*[→>\-]*\s*(.+?\.log)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private readonly Settings _settings;
     private readonly IWslDistro _wsl;
@@ -18,6 +21,8 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     private readonly DaemonStateMachine _machine = new();
     private readonly SemaphoreSlim _localControlGate = new(1, 1);
     private IProcess? _process;
+    private bool _adopted;
+    private int _adoptedMisses;
     private bool _intentionalExit;
     private bool _disposed;
     private string? _logPath;
@@ -129,11 +134,14 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (await IsHealthyAsync())
         {
             _machine.Adopt();
+            _adopted = true;
+            _adoptedMisses = 0;
             _logger.LogInformation("Adopting the daemon already answering on port {Port}.", _settings.Port);
             PublishState();
             return;
         }
 
+        _adopted = false;
         _machine.BeginStart();
         PublishState();
         _logPath = null;
@@ -162,6 +170,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     {
         _logger.LogInformation("Stop requested; state {State}.", State);
         _intentionalExit = true;
+        _adopted = false;
         _shutdown.Cancel();
 
         var process = _process;
@@ -220,12 +229,28 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         var healthy = await IsHealthyAsync();
         if (healthy)
         {
+            _adoptedMisses = 0;
             _machine.HealthSucceeded();
             PublishState();
             await RefreshLocalControlPairingAsync(_shutdown.Token);
         }
         else if (State is DaemonState.Starting or DaemonState.Running)
         {
+            // An adopted daemon has no child process to watch, so sustained failed health is the only
+            // signal that it died. Without this the state would sit at Starting and auto-restart
+            // would never fire.
+            if (_adopted)
+            {
+                _adoptedMisses++;
+                if (_adoptedMisses >= AdoptedMissesBeforeCrash)
+                {
+                    _adopted = false;
+                    _adoptedMisses = 0;
+                    _logger.LogError("The adopted daemon at {HealthUri} stopped responding.", _settings.HealthUri);
+                    HandleUnexpectedExit();
+                    return;
+                }
+            }
             if (State == DaemonState.Running) _logger.LogWarning("Health check FAILED at {HealthUri}; daemon stopped responding.", _settings.HealthUri);
             _machine.HealthFailed();
             PublishState();
@@ -266,7 +291,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         {
             "-d", distro,
             "-u", profile.LinuxUser,
-            "--",
+            "-e",
             profile.ResolvedQwenExecutable,
             "serve",
             "--hostname", settings.Host,
@@ -300,6 +325,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(settings.Host)) yield return "Hostname is empty; the daemon refuses to start.";
         if (string.IsNullOrWhiteSpace(settings.WslDistroName)) yield return "The WSL distro name is empty; the daemon has no host.";
         if (string.IsNullOrWhiteSpace(settings.ResolveActiveProfile().LinuxUser)) yield return "The active profile has no Linux user.";
+        if (!settings.ResolveActiveProfile().IsShellSafe) yield return "The active profile's Linux user or directory holds characters that are not allowed.";
         if (settings.LocalControl && !IsLoopbackHost(settings.Host)) yield return "Device pairing requires the main daemon address to be 127.0.0.1.";
         if (settings.LocalControl && !settings.ServeWeb) yield return "Device pairing requires the Web Shell to be enabled.";
         if (settings.LocalControl && settings.ExtraArgs.Any(argument => argument.StartsWith("--hostname", StringComparison.Ordinal))) yield return "Remove the --hostname override from extra arguments to enable device pairing.";

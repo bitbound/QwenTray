@@ -31,15 +31,26 @@ public sealed class WslDistroProvisioner(
     {
         logger.LogInformation("Provisioning distro {Distro} with {ProfileCount} profile(s).", distro, profiles.Count);
 
+        foreach (var profile in profiles)
+        {
+            // The user name and directory are interpolated into root shell scripts, so refuse any
+            // value that is not a plain user name or absolute path.
+            if (!profile.IsShellSafe) throw new InvalidOperationException($"The \"{profile.Name}\" profile has a user name or directory that is not allowed.");
+        }
+
         if (!await wsl.DistroExistsAsync(distro, cancellationToken))
         {
             var install = await wsl.InstallDistroAsync(distro, cancellationToken);
             if (!install.Succeeded) throw new InvalidOperationException($"Could not create the {distro} distro. {install.Output}");
         }
 
-        // Interop and automount are what make a distro able to read C: and run Windows binaries, so
-        // both are off before any user is created.
-        await RequireAsync(distro, BuildWriteFileScript("/etc/wsl.conf", BuildWslConf(profiles[0].LinuxUser)), cancellationToken);
+        // Interop and automount let the distro read C: and run Windows binaries. wsl.conf is read at
+        // boot, so the distro is terminated right after it is written. Everything that follows, and
+        // the daemon itself, then runs with the isolation in force.
+        await RequireAsync(distro, BuildWriteFileScript("/etc/wsl.conf", BuildWslConf()), cancellationToken);
+        var terminated = await wsl.TerminateAsync(distro, cancellationToken);
+        if (!terminated.Succeeded) throw new InvalidOperationException($"Could not stop the {distro} distro to apply its isolation settings. {terminated.Output}");
+
         await RequireAsync(distro, "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git gh sudo openssh-client curl ca-certificates", cancellationToken);
 
         foreach (var profile in profiles)
@@ -120,8 +131,10 @@ public sealed class WslDistroProvisioner(
         return string.Join(Environment.NewLine, lines).TrimEnd() + Environment.NewLine;
     }
 
-    internal static string BuildWslConf(string defaultUser) =>
-        $"""
+    // No [user] default here. Every QwenTray command passes -u explicitly, and naming a user that
+    // does not exist yet can stop the distro from booting on the next start.
+    internal static string BuildWslConf() =>
+        """
         [boot]
         systemd=true
 
@@ -131,9 +144,6 @@ public sealed class WslDistroProvisioner(
         [interop]
         enabled=false
         appendWindowsPath=false
-
-        [user]
-        default={defaultUser}
         """;
 
     /// <summary>

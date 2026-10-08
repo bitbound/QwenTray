@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Extensions.Logging.Abstractions;
 using QwenTray;
 using QwenTray.Services;
 using QwenTray.ViewModels;
@@ -9,9 +10,17 @@ namespace QwenTray.Tests;
 public sealed class WslCommandTests
 {
     [Fact]
-    public void ScriptRunsThroughBashAsTheRequestedUser()
+    public void ScriptRunsThroughBashWithoutTheDefaultShell()
     {
-        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "--", "/bin/bash", "-lc", "echo hi"], WslDistro.BuildScriptCommand("QwenTray", "qwen", "echo hi"));
+        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/bin/bash", "-lc", "echo hi"], WslDistro.BuildScriptCommand("QwenTray", "qwen", "echo hi"));
+    }
+
+    [Fact]
+    public void DistroNamesSurviveNulAndBomAndSplitOnEither()
+    {
+        Assert.Equal(["Ubuntu-26.04", "QwenTray", "docker-desktop"], WslDistro.ParseDistroNames("Ubuntu-26.04\r\n\0QwenTray\0\r\n\uFEFFdocker-desktop\r\n"));
+        Assert.Equal(["A", "B", "C"], WslDistro.ParseDistroNames("A\0B\0C"));
+        Assert.Equal([], WslDistro.ParseDistroNames("   \r\n"));
     }
 
     [Fact]
@@ -20,13 +29,6 @@ public sealed class WslCommandTests
         Assert.Equal("--terminate QwenTray", WslDistro.BuildArguments(["--terminate", "QwenTray"]));
         Assert.Equal("-d \"a b\"", WslDistro.BuildArguments(["-d", "a b"]));
         Assert.Equal("-- \"a b\"", WslDistro.BuildArguments(["--", "a b"]));
-    }
-
-    [Fact]
-    public void DistroNamesComeBackCleanOfNulAndBom()
-    {
-        var names = WslDistro.ParseDistroNames("Ubuntu-26.04\r\n\0QwenTray\0\r\n\uFEFFdocker-desktop\r\n");
-        Assert.Equal(["Ubuntu-26.04", "QwenTray", "docker-desktop"], names);
     }
 
     [Fact]
@@ -73,13 +75,14 @@ public sealed class WslConfigTests
     }
 
     [Fact]
-    public void WslConfSealsInteropAndAutomountAndSetsTheDefaultUser()
+    public void WslConfSealsInteropAndAutomountAndNamesNoDefaultUser()
     {
-        var conf = WslDistroProvisioner.BuildWslConf("qwen");
+        var conf = WslDistroProvisioner.BuildWslConf();
         Assert.Contains("[automount]\nenabled=false", conf, StringComparison.Ordinal);
         Assert.Contains("[interop]\nenabled=false", conf, StringComparison.Ordinal);
         Assert.Contains("appendWindowsPath=false", conf, StringComparison.Ordinal);
-        Assert.Contains("default=qwen", conf, StringComparison.Ordinal);
+        // Naming a user that does not exist yet can stop the distro from booting, so there is none.
+        Assert.DoesNotContain("[user]", conf, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -160,16 +163,49 @@ public sealed class IdentityTests
     }
 
     [Fact]
-    public void TokenScriptNeverEmbedsTheRawToken()
+    public async Task ReadingThePublicKeyCatsTheKeyFileInsteadOfExecutingIt()
     {
-        var script = IdentityService.BuildGitHubTokenScript("ghp_secretvalue");
-        Assert.DoesNotContain("ghp_secretvalue", script, StringComparison.Ordinal);
-        const string prefix = "printf %s ";
-        var start = script.IndexOf(prefix, StringComparison.Ordinal) + prefix.Length;
-        var end = script.IndexOf(" | base64", StringComparison.Ordinal);
-        Assert.Equal("ghp_secretvalue", Encoding.UTF8.GetString(Convert.FromBase64String(script[start..end])));
-        Assert.Contains("gh auth login", script, StringComparison.Ordinal);
-        Assert.Contains("--with-token", script, StringComparison.Ordinal);
+        var wsl = new FakeWslDistro();
+        var service = new IdentityService(wsl, NullLogger<IdentityService>.Instance);
+        var key = await service.ReadPublicKeyAsync("QwenTray", new IdentityProfile { LinuxUser = "qwen" }, CancellationToken.None);
+        Assert.Contains("cat ~/.ssh/id_ed25519.pub", wsl.Scripts);
+        Assert.Equal("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@qwentray", key);
+    }
+
+    [Fact]
+    public void TokenScriptNeverCarriesTheSecretAndReadsStdin()
+    {
+        var script = IdentityService.BuildGitHubTokenScript();
+        Assert.Equal("gh auth login --hostname github.com --with-token", script);
+        Assert.DoesNotContain("base64", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("printf", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LinuxUserNameAndPathsMustBeShellSafe()
+    {
+        var good = new IdentityProfile { LinuxUser = "qwen" };
+        Assert.True(good.IsShellSafe);
+        Assert.Equal("/home/qwen/.local/bin/qwen", good.ResolvedQwenExecutable);
+
+        Assert.False(new IdentityProfile { LinuxUser = "qwen;evil" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", WorkspaceDirectory = "/tmp/x'; evil; '" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", QwenExecutable = "/opt/q $x" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", WorkspaceDirectory = "relative/path" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", WorkspaceDirectory = "/home/qwen/my work" }.IsShellSafe);
+    }
+
+    [Fact]
+    public void DistroNamesAreRestrictedToASafeCharset()
+    {
+        Assert.True(SettingsViewModel.IsSafeDistroName("QwenTray"));
+        Assert.True(SettingsViewModel.IsSafeDistroName("Qwen-Tray_2.0"));
+        Assert.False(SettingsViewModel.IsSafeDistroName("Distro & notepad.exe"));
+        Assert.False(SettingsViewModel.IsSafeDistroName("bad;name"));
+        // A leading dash or dot would be read as a wsl.exe option.
+        Assert.False(SettingsViewModel.IsSafeDistroName("-u"));
+        Assert.False(SettingsViewModel.IsSafeDistroName(".hidden"));
+        Assert.False(SettingsViewModel.IsSafeDistroName(string.Empty));
     }
 
     [Theory]

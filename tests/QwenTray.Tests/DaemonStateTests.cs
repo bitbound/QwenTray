@@ -188,7 +188,7 @@ public sealed class DaemonArgumentsTests
     {
         var settings = new Settings();
         var args = DaemonSupervisor.BuildArguments(settings, settings.WslDistroName, settings.ResolveActiveProfile());
-        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "--", "/home/qwen/.local/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170"], args);
+        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/home/qwen/.local/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170"], args);
     }
 
     [Fact]

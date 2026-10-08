@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Bitbound.SystemAbstractions.FileSystem;
 
 namespace QwenTray;
@@ -9,6 +10,11 @@ namespace QwenTray;
 /// </summary>
 public sealed class IdentityProfile
 {
+    // These values are interpolated into shell scripts that run as root, so they are restricted to a
+    // charset that cannot carry shell metacharacters.
+    private static readonly Regex LinuxUserNamePattern = new("^[a-z_][a-z0-9_-]{0,31}$", RegexOptions.Compiled);
+    private static readonly Regex SafeAbsolutePathPattern = new("^/[A-Za-z0-9_./-]*$", RegexOptions.Compiled);
+
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string LinuxUser { get; set; } = "";
@@ -26,6 +32,16 @@ public sealed class IdentityProfile
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string ResolvedWorkspaceDirectory => string.IsNullOrWhiteSpace(WorkspaceDirectory) ? $"{HomeDirectory}/workspace" : WorkspaceDirectory;
+
+    /// <summary>Whether every value is safe to place inside a root shell script.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsShellSafe => IsValidLinuxUser(LinuxUser)
+        && IsSafeAbsolutePath(ResolvedQwenExecutable)
+        && IsSafeAbsolutePath(ResolvedWorkspaceDirectory);
+
+    internal static bool IsValidLinuxUser(string? user) => user is not null && LinuxUserNamePattern.IsMatch(user);
+
+    internal static bool IsSafeAbsolutePath(string? path) => path is not null && SafeAbsolutePathPattern.IsMatch(path);
 }
 
 public sealed class Settings

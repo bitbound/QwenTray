@@ -8,10 +8,21 @@ namespace QwenTray.Tests;
 /// <summary>A distro double that records nothing and never shells out.</summary>
 internal sealed class FakeWslDistro : IWslDistro
 {
+    public List<string> Scripts { get; } = [];
+
     public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(true);
 
     public Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken)
-        => Task.FromResult(new WslCommandResult(0, string.Empty));
+    {
+        Scripts.Add(script);
+        return Task.FromResult(new WslCommandResult(0, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@qwentray"));
+    }
+
+    public Task<WslCommandResult> RunScriptWithInputAsync(string distro, string user, string script, string input, CancellationToken cancellationToken)
+    {
+        Scripts.Add(script);
+        return Task.FromResult(new WslCommandResult(0, string.Empty));
+    }
 
     public Task<WslCommandResult> RunRootScriptAsync(string distro, string script, CancellationToken cancellationToken)
         => Task.FromResult(new WslCommandResult(0, string.Empty));
