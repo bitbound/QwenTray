@@ -4,8 +4,10 @@ using Bitbound.SystemAbstractions.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QwenTray.Services;
+using QwenTray.Updates;
 using QwenTray.ViewModels;
 using QwenTray.Views;
+using System.Net.Http;
 using System.Threading;
 
 namespace QwenTray;
@@ -18,6 +20,15 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // A downloaded copy is launched with the handoff arguments and acts as the installer. It has to
+        // run before the single-instance mutex and the UI, because the process it replaces still holds
+        // the mutex until it is stopped.
+        if (UpdateHandoff.TryParse(args) is not null)
+        {
+            RunUpdateHandoff(args);
+            return;
+        }
+
         _mutex = new Mutex(initiallyOwned: true, "Local\\QwenTray.SingleInstance", out var createdNew);
         if (!createdNew)
         {
@@ -91,6 +102,10 @@ internal static class Program
         services.AddSingleton<DaemonSupervisor>();
         services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();
 
+        services.AddSingleton(AppInfo.Current());
+        services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(60) });
+        services.AddSingleton<IUpdateService, GitHubReleaseUpdateService>();
+
         services.AddSingleton<ISnackbarService, SnackbarService>();
         services.AddSingleton<IConfirmDialogService, ConfirmDialogService>();
 
@@ -104,6 +119,30 @@ internal static class Program
         services.AddTransient<DaemonView>();
         services.AddTransient<SettingsView>();
         services.AddTransient<AboutView>();
+
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// Runs the downloaded copy as the installer. A minimal container is enough, and it uses the same
+    /// file logger as the main app so a failed update lands in qwentray.log.
+    /// </summary>
+    private static void RunUpdateHandoff(string[] args)
+    {
+        using var services = BuildHandoffServices();
+        var runner = services.GetRequiredService<UpdateHandoffRunner>();
+
+        runner.RunAsync(args, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    private static ServiceProvider BuildHandoffServices()
+    {
+        var services = new ServiceCollection();
+        services.AddSystemAbstractions();
+        services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Information));
+        services.AddSingleton(provider => new FileLoggerProvider(() => provider, SettingsStore.LogFilePath));
+        services.AddSingleton<ILoggerProvider>(provider => provider.GetRequiredService<FileLoggerProvider>());
+        services.AddSingleton<UpdateHandoffRunner>();
 
         return services.BuildServiceProvider();
     }

@@ -9,6 +9,7 @@ using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QwenTray.Services;
+using QwenTray.Updates;
 using QwenTray.ViewModels;
 using QwenTray.Views;
 
@@ -24,6 +25,7 @@ public partial class App : Application
     private WslDistroProvisioner _provisioner = null!;
     private IProcessManager _processes = null!;
     private INavigationProvider _navigation = null!;
+    private IUpdateService _updates = null!;
     private ILogger<App> _logger = null!;
     private TrayIcon? _icon;
     private MainWindow? _mainWindow;
@@ -33,6 +35,7 @@ public partial class App : Application
     private bool _isShellInitialized;
     private bool _isExiting;
     private bool _stopping;
+    private string? _availableUpdateVersion;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -54,8 +57,10 @@ public partial class App : Application
         _provisioner = services.GetRequiredService<WslDistroProvisioner>();
         _processes = services.GetRequiredService<IProcessManager>();
         _navigation = services.GetRequiredService<INavigationProvider>();
+        _updates = services.GetRequiredService<IUpdateService>();
         _supervisor.StateChanged += OnStateChanged;
         _autostart.Changed += OnAutostartChanged;
+        _updates.UpdateAvailable += OnUpdateAvailable;
         _icon = GetValue(TrayIcon.IconsProperty)?.FirstOrDefault();
         UpdateTrayCommandAvailability(_supervisor.State);
         SetAutostartMenuChecked();
@@ -80,7 +85,30 @@ public partial class App : Application
         _timer.Start();
         _logger.LogInformation("QwenTray tray ready. Distro={Distro} Profile={Profile} HealthUri={HealthUri} PollSeconds={PollSeconds}", _settings.WslDistroName, _settings.ResolveActiveProfile().Name, _settings.HealthUri, pollSeconds);
         _ = StartDaemonOnStartupAsync();
+
+        if (_settings.CheckForUpdates)
+        {
+            _ = CheckForUpdatesAsync();
+        }
+
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            var update = await _updates.CheckAsync();
+
+            if (update is not null)
+            {
+                _logger.LogInformation("A newer QwenTray is available: {Version}.", update.Version);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "The update check failed.");
+        }
     }
 
     // Launching into a distro that was never set up would spawn a daemon that immediately crashes and
@@ -158,6 +186,24 @@ public partial class App : Application
         ShowMainWindow();
     }
 
+    private async void OnCheckForUpdates(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+
+        try
+        {
+            // The window's banner is driven by the update service, so opening it is what reveals the news.
+            if (await _updates.CheckAsync() is not null)
+            {
+                ShowMainWindow();
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "The update check from the tray failed.");
+        }
+    }
+
     private void OnShowWindow(object? sender, EventArgs e)
     {
         ResetMenuItem(sender);
@@ -213,9 +259,33 @@ public partial class App : Application
         if (_icon is not null)
         {
             _icon.Icon = new WindowIcon(AssetLoader.Open(new Uri($"avares://QwenTray/Assets/{file}")));
-            _icon.ToolTipText = $"QwenTray: {state.ToString().ToLowerInvariant()}";
         }
+        SetTrayToolTip(state);
         UpdateTrayCommandAvailability(state);
+    }
+
+    // Avalonia's TrayIcon has no balloon API, so an available update is surfaced where the tray can
+    // reach without a window: the hover tooltip.
+    private void SetTrayToolTip(DaemonState state)
+    {
+        if (_icon is null) return;
+
+        var status = state.ToString().ToLowerInvariant();
+        _icon.ToolTipText = _availableUpdateVersion is null
+            ? $"QwenTray: {status}"
+            : $"QwenTray: {status}. Update available ({_availableUpdateVersion}).";
+    }
+
+    private void OnUpdateAvailable(object? sender, UpdateInfo info)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnUpdateAvailable(sender, info));
+            return;
+        }
+
+        _availableUpdateVersion = info.Version;
+        SetTrayToolTip(_supervisor.State);
     }
 
     private void UpdateTrayCommandAvailability(DaemonState state)

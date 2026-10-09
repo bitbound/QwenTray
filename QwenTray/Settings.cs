@@ -56,6 +56,7 @@ public sealed class Settings
     public int HealthPollSeconds { get; set; } = 5;
     public bool AutoRestart { get; set; } = true;
     public int MaxBackoffSeconds { get; set; } = 60;
+    public bool CheckForUpdates { get; set; } = true;
     public string Token { get; set; } = "";
     public bool RequireAuth { get; set; }
     public bool EnableSessionShell { get; set; }

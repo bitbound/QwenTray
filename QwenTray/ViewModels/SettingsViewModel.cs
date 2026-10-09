@@ -10,6 +10,7 @@ using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.Logging;
 using QRCoder;
 using QwenTray.Services;
+using QwenTray.Updates;
 using QwenTray.Views;
 
 namespace QwenTray.ViewModels;
@@ -28,6 +29,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private readonly IdentityService _identity;
     private readonly WslConfigSyncService _sync;
     private readonly IProcessManager _processes;
+    private readonly IUpdateService _updates;
     private readonly ISnackbarService _snackbars;
     private readonly IConfirmDialogService _confirm;
     private readonly ILogger<SettingsViewModel> _logger;
@@ -208,6 +210,15 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private bool _autoRestart;
 
     [ObservableProperty]
+    private bool _checkForUpdates;
+
+    [ObservableProperty]
+    private bool _isCheckingForUpdates;
+
+    [ObservableProperty]
+    private string? _updateCheckStatus;
+
+    [ObservableProperty]
     private string _maxBackoffSeconds = string.Empty;
 
     [ObservableProperty]
@@ -251,6 +262,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         IdentityService identity,
         WslConfigSyncService sync,
         IProcessManager processes,
+        IUpdateService updates,
         ISnackbarService snackbars,
         IConfirmDialogService confirm,
         ILogger<SettingsViewModel> logger)
@@ -265,6 +277,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _identity = identity;
         _sync = sync;
         _processes = processes;
+        _updates = updates;
         _snackbars = snackbars;
         _confirm = confirm;
         _logger = logger;
@@ -345,6 +358,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         DebugMode = _settings.DebugMode;
         HealthPollSeconds = _settings.HealthPollSeconds.ToString();
         AutoRestart = _settings.AutoRestart;
+        CheckForUpdates = _settings.CheckForUpdates;
         MaxBackoffSeconds = _settings.MaxBackoffSeconds.ToString();
         ExtraArgs = string.Join(Environment.NewLine, _settings.ExtraArgs);
         SyncEntries = string.Join(Environment.NewLine, EffectiveSyncPaths());
@@ -447,6 +461,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _settings.DebugMode = DebugMode;
         _settings.HealthPollSeconds = Math.Clamp(ParseInt(HealthPollSeconds, _settings.HealthPollSeconds), 1, 60);
         _settings.AutoRestart = AutoRestart;
+        _settings.CheckForUpdates = CheckForUpdates;
         _settings.MaxBackoffSeconds = Math.Max(1, ParseInt(MaxBackoffSeconds, _settings.MaxBackoffSeconds));
         _settings.ExtraArgs = SplitLines(ExtraArgs);
         _settings.SyncPaths = SplitLines(SyncEntries);
@@ -771,6 +786,32 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         {
             QwenProgress = null;
             IsQwenBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CheckForUpdatesNowAsync()
+    {
+        IsCheckingForUpdates = true;
+        UpdateCheckStatus = "Asking GitHub for the latest release…";
+
+        try
+        {
+            var update = await _updates.CheckAsync();
+            UpdateCheckStatus = update is null
+                ? "QwenTray is up to date."
+                : $"Version {update.Version} is available. Use the link in the status bar to install it.";
+            _snackbars.Show(UpdateCheckStatus, update is null ? SnackbarKind.Success : SnackbarKind.Info);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "The update check failed.");
+            UpdateCheckStatus = $"Could not check for updates: {ex.Message}";
+            _snackbars.Show(UpdateCheckStatus, SnackbarKind.Error);
+        }
+        finally
+        {
+            IsCheckingForUpdates = false;
         }
     }
 

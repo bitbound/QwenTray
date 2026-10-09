@@ -40,6 +40,7 @@
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="Open Web Shell" ToggleType="CheckBox" IsChecked="False" Click="OnOpenWeb" />
             <NativeMenuItem Header="Open daemon log" ToggleType="CheckBox" IsChecked="False" Click="OnOpenLog" />
+            <NativeMenuItem Header="Check for updates" ToggleType="CheckBox" IsChecked="False" Click="OnCheckForUpdates" />
             <NativeMenuItem Header="Settings..." ToggleType="CheckBox" IsChecked="False" Click="OnOpenSettings" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="Start with Windows" ToggleType="CheckBox" Click="OnAutostart" />

@@ -99,7 +99,7 @@
             BorderBrush="{DynamicResource DividerBrush}"
             BorderThickness="0,1,0,0"
             Padding="12,6">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
 
         <PathIcon Grid.Column="0"
                   Classes="state"
@@ -121,6 +121,14 @@
                    Foreground="{DynamicResource TextDisabledBrush}" />
 
         <HyperlinkButton Grid.Column="4"
+                         Content="{Binding UpdateVersion, StringFormat='Update available ({0})'}"
+                         Command="{Binding ApplyUpdateCommand}"
+                         IsEnabled="{Binding !IsApplyingUpdate}"
+                         IsVisible="{Binding IsUpdateAvailable}"
+                         VerticalAlignment="Center"
+                         Margin="0,0,12,0" />
+
+        <HyperlinkButton Grid.Column="5"
                          Content="Open Web Shell"
                          Command="{Binding OpenWebShellCommand}"
                          VerticalAlignment="Center" />
