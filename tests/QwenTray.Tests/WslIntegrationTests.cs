@@ -193,6 +193,46 @@ public sealed class IdentityTests
     }
 
     [Fact]
+    public void GpgKeyScriptIsIdempotentAndQuotesTheUid()
+    {
+        var script = IdentityService.BuildEnsureGpgKeyScript(new IdentityProfile { LinuxUser = "qwen" });
+        Assert.Contains("--list-secret-keys \"QwenTray qwen <qwen@qwentray.local>\"", script, StringComparison.Ordinal);
+        Assert.Contains("||", script, StringComparison.Ordinal);
+        Assert.Contains("--quick-generate-key \"QwenTray qwen <qwen@qwentray.local>\" ed25519 default never", script, StringComparison.Ordinal);
+        Assert.Contains("--pinentry-mode loopback", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GpgExportScriptArmorsThePublicKey()
+    {
+        Assert.Equal("gpg --armor --export \"QwenTray qwen <qwen@qwentray.local>\"", IdentityService.BuildGpgExportScript(new IdentityProfile { LinuxUser = "qwen" }));
+    }
+
+    [Fact]
+    public void GpgUidNeverUsesTheFreeTextDisplayName()
+    {
+        // The display name is unrestricted, so it must never reach a shell script.
+        var profile = new IdentityProfile { LinuxUser = "qwen", Name = "qwen\"; touch /pwned; \"" };
+        Assert.Equal("QwenTray qwen <qwen@qwentray.local>", IdentityService.GpgUserId(profile));
+        Assert.DoesNotContain("pwned", IdentityService.BuildEnsureGpgKeyScript(profile), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadingTheGpgKeyAcceptsOnlyAnArmoredBlock()
+    {
+        const string armored = "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEaskSgBYJKwYBBAHaRw8BAQdAtWIb\n-----END PGP PUBLIC KEY BLOCK-----";
+        var wsl = new FakeWslDistro { ScriptOutput = armored };
+        var service = new IdentityService(wsl, NullLogger<IdentityService>.Instance);
+        var profile = new IdentityProfile { LinuxUser = "qwen" };
+
+        Assert.Equal(armored, await service.ReadGpgPublicKeyAsync("QwenTray", profile, CancellationToken.None));
+        Assert.Contains(wsl.Scripts, script => script.Contains("--armor --export", StringComparison.Ordinal));
+
+        wsl.ScriptOutput = "gpg: WARNING: unsafe permissions on homedir";
+        Assert.Null(await service.ReadGpgPublicKeyAsync("QwenTray", profile, CancellationToken.None));
+    }
+
+    [Fact]
     public void TokenScriptNeverCarriesTheSecretAndReadsStdin()
     {
         var script = IdentityService.BuildGitHubTokenScript();

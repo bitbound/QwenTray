@@ -107,6 +107,15 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string? _sshStatus;
 
     [ObservableProperty]
+    private string _gpgPublicKey = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasGpgPublicKey;
+
+    [ObservableProperty]
+    private string? _gpgStatus;
+
+    [ObservableProperty]
     private string _gitHubToken = string.Empty;
 
     [ObservableProperty]
@@ -663,6 +672,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             SshPublicKey = await _identity.ReadPublicKeyAsync(distro, profile, CancellationToken.None) ?? string.Empty;
             HasSshPublicKey = SshPublicKey.Length > 0;
             SshStatus = HasSshPublicKey ? null : "No ssh key yet for this profile. Choose Generate key.";
+            GpgPublicKey = await _identity.ReadGpgPublicKeyAsync(distro, profile, CancellationToken.None) ?? string.Empty;
+            HasGpgPublicKey = GpgPublicKey.Length > 0;
+            GpgStatus = HasGpgPublicKey ? null : "No signing key yet for this profile. Choose Generate key.";
             var status = await _identity.GetGitHubAuthStatusAsync(distro, profile, CancellationToken.None);
             GitHubStatus = status.IsAuthenticated ? $"Signed in as {status.Account}." : "Not signed in.";
         }
@@ -691,13 +703,42 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     }
 
     [RelayCommand]
+    private async Task GenerateGpgKeyAsync()
+    {
+        var distro = WslDistroName.Trim();
+        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        try
+        {
+            await _identity.EnsureGpgKeyAsync(distro, profile, CancellationToken.None);
+            await LoadIdentityAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Generating the signing key failed.");
+            GpgStatus = $"Could not generate the signing key: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
     private async Task CopySshKeyAsync()
     {
         if (!HasSshPublicKey) return;
+        if (await CopyToClipboardAsync(SshPublicKey)) SshStatus = "Public key copied to the clipboard.";
+    }
+
+    [RelayCommand]
+    private async Task CopyGpgKeyAsync()
+    {
+        if (!HasGpgPublicKey) return;
+        if (await CopyToClipboardAsync(GpgPublicKey)) GpgStatus = "Public key copied to the clipboard.";
+    }
+
+    private static async Task<bool> CopyToClipboardAsync(string text)
+    {
         var clipboard = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow?.Clipboard;
-        if (clipboard is null) return;
-        await clipboard.SetTextAsync(SshPublicKey);
-        SshStatus = "Public key copied to the clipboard.";
+        if (clipboard is null) return false;
+        await clipboard.SetTextAsync(text);
+        return true;
     }
 
     [RelayCommand]

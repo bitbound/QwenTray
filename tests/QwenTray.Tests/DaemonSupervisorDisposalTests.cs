@@ -10,12 +10,14 @@ internal sealed class FakeWslDistro : IWslDistro
 {
     public List<string> Scripts { get; } = [];
 
+    public string ScriptOutput { get; set; } = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@qwentray";
+
     public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(true);
 
     public Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken)
     {
         Scripts.Add(script);
-        return Task.FromResult(new WslCommandResult(0, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@qwentray"));
+        return Task.FromResult(new WslCommandResult(0, ScriptOutput));
     }
 
     public Task<WslCommandResult> RunScriptWithInputAsync(string distro, string user, string script, string input, CancellationToken cancellationToken)

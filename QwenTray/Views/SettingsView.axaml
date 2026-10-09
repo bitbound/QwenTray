@@ -260,6 +260,32 @@
                          IsVisible="{Binding SshStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
 
+            <TextBlock Classes="field" Text="GPG public key" Margin="0,10,0,0" />
+            <StackPanel Spacing="6">
+              <TextBox Text="{Binding GpgPublicKey}"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       MinHeight="48"
+                       FontFamily="Consolas,Menlo,monospace" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Copy public key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding CopyGpgKeyCommand}"
+                        IsEnabled="{Binding HasGpgPublicKey}" />
+                <Button Content="Generate key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding GenerateGpgKeyCommand}" />
+              </StackPanel>
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         Text="An ed25519 signing key with no passphrase, held in this profile's own keyring, so it can sign commits unattended." />
+              <TextBlock Text="{Binding GpgStatus}"
+                         Classes="caption"
+                         TextWrapping="Wrap"
+                         IsVisible="{Binding GpgStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+
             <TextBlock Classes="field" Text="GitHub token" Margin="0,10,0,0" />
             <StackPanel Spacing="6">
               <Grid ColumnDefinitions="*,Auto">

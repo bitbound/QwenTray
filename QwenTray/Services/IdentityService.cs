@@ -5,12 +5,19 @@ namespace QwenTray.Services;
 public sealed record GitHubAuthStatus(bool IsAuthenticated, string? Account);
 
 /// <summary>
-/// Manages the per-profile credentials that make one Linux user a distinct identity: the ssh keypair
-/// and the GitHub token. Everything lives in the profile's home directory inside the distro.
+/// Manages the per-profile credentials that make one Linux user a distinct identity: the ssh keypair,
+/// the signing key, and the GitHub token. Everything lives in the profile's home directory inside the
+/// distro.
 /// </summary>
 public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> logger)
 {
     public const string SshKeyPath = "~/.ssh/id_ed25519";
+
+    /// <summary>
+    /// The uid of a profile's signing key. It is built from the Linux user, which is restricted to a
+    /// metacharacter-free charset, so it is safe to place inside the generation script.
+    /// </summary>
+    public static string GpgUserId(IdentityProfile profile) => $"QwenTray {profile.LinuxUser} <{profile.LinuxUser}@qwentray.local>";
 
     public async Task EnsureSshKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {
@@ -24,6 +31,20 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
         if (!result.Succeeded) return null;
         var key = result.Output.Trim();
         return key.StartsWith("ssh-", StringComparison.Ordinal) ? key : null;
+    }
+
+    public async Task EnsureGpgKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildEnsureGpgKeyScript(profile), cancellationToken);
+        if (!result.Succeeded) throw new InvalidOperationException($"Could not create the signing key for {profile.Name}. {result.Output}");
+    }
+
+    public async Task<string?> ReadGpgPublicKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildGpgExportScript(profile), cancellationToken);
+        if (!result.Succeeded) return null;
+        var key = result.Output.Trim();
+        return key.StartsWith("-----BEGIN PGP PUBLIC KEY BLOCK-----", StringComparison.Ordinal) ? key : null;
     }
 
     public async Task SetGitHubTokenAsync(string distro, IdentityProfile profile, string token, CancellationToken cancellationToken)
@@ -47,6 +68,16 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
 
     internal static string BuildEnsureSshKeyScript() =>
         $"test -f {SshKeyPath} || (mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -t ed25519 -N '' -C qwentray -f {SshKeyPath} >/dev/null && chmod 600 {SshKeyPath})";
+
+    // The signing key has no passphrase so the daemon can sign unattended. The uid is always quoted
+    // because it holds angle brackets and a space.
+    internal static string BuildEnsureGpgKeyScript(IdentityProfile profile)
+    {
+        var uid = GpgUserId(profile);
+        return $"gpg --batch --list-secret-keys \"{uid}\" >/dev/null 2>&1 || gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key \"{uid}\" ed25519 default never";
+    }
+
+    internal static string BuildGpgExportScript(IdentityProfile profile) => $"gpg --armor --export \"{GpgUserId(profile)}\"";
 
     /// <summary>Reads the token from stdin so it never appears on a command line or in a process list.</summary>
     internal static string BuildGitHubTokenScript()
