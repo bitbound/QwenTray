@@ -31,7 +31,15 @@ internal static class Program
             App.Services = _services;
             var logger = _services.GetRequiredService<ILoggerFactory>().CreateLogger("QwenTray.Program");
             var settings = _services.GetRequiredService<Settings>();
-            logger.LogInformation("Starting QwenTray. ProcessId={ProcessId} Executable={Executable} LogFile={LogFile} Distro={Distro} Profile={Profile}", Environment.ProcessId, Environment.ProcessPath, SettingsStore.LogFilePath, settings.WslDistroName, settings.ResolveActiveProfile().Name);
+            
+            logger.LogInformation(
+              "Starting QwenTray. ProcessId={ProcessId} Executable={Executable} LogFile={LogFile} Distro={Distro} Profile={Profile}", 
+              Environment.ProcessId, 
+              Environment.ProcessPath, 
+              SettingsStore.LogFilePath,
+              settings.WslDistroName, 
+              settings.ResolveActiveProfile().Name);
+
             BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
             logger.LogInformation("QwenTray application lifetime ended.");
         }
@@ -55,7 +63,11 @@ internal static class Program
         var services = new ServiceCollection();
         services.AddSystemAbstractions();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Information));
-        services.AddSingleton<FileLoggerProvider>(provider => new FileLoggerProvider(provider.GetRequiredService<IFileSystem>(), SettingsStore.LogFilePath));
+        // The container's IFileSystem takes ILogger<T>, which the container builds from the
+        // ILoggerFactory that consumes this provider, so handing the provider an IFileSystem
+        // here would loop. It captures the provider and resolves IFileSystem on first write,
+        // after the ILoggerFactory singleton is cached.
+        services.AddSingleton(provider => new FileLoggerProvider(() => provider, SettingsStore.LogFilePath));
         services.AddSingleton<ILoggerProvider>(provider => provider.GetRequiredService<FileLoggerProvider>());
 
         // Settings are read once on first use, which keeps the load off the container-building path.

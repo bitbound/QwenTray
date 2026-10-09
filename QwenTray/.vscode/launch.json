@@ -1,0 +1,17 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug QwenTray",
+			"type": "dotnet",
+			"request": "launch",
+			"projectPath": "${workspaceFolder}/QwenTray.csproj"
+		},
+		{
+			"name": "Attach to QwenTray",
+			"type": "coreclr",
+			"request": "attach",
+			"processId": "${command:pickProcess}"
+		}
+	]
+}
