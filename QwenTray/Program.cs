@@ -29,9 +29,13 @@ internal static class Program
         {
             _services = BuildServices();
             App.Services = _services;
-            var logger = _services.GetRequiredService<ILoggerFactory>().CreateLogger("QwenTray.Program");
+
+            var logger = _services
+              .GetRequiredService<ILoggerFactory>()
+              .CreateLogger("QwenTray.Program");
+
             var settings = _services.GetRequiredService<Settings>();
-            
+
             logger.LogInformation(
               "Starting QwenTray. ProcessId={ProcessId} Executable={Executable} LogFile={LogFile} Distro={Distro} Profile={Profile}", 
               Environment.ProcessId, 
@@ -45,7 +49,11 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            _services?.GetService<ILoggerFactory>()?.CreateLogger("QwenTray.Program").LogCritical(exception, "QwenTray terminated after an unhandled exception.");
+            _services
+              ?.GetService<ILoggerFactory>()
+              ?.CreateLogger("QwenTray.Program")
+              .LogCritical(exception, "QwenTray terminated after an unhandled exception.");
+              
             throw;
         }
         finally
