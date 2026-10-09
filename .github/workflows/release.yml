@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       prerelease:
-        description: Create a beta pre-release
+        description: Is prerelease?
         required: true
         default: false
         type: boolean
