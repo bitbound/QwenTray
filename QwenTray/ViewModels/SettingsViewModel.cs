@@ -56,13 +56,34 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string _profileWorkspace = string.Empty;
 
     [ObservableProperty]
-    private string _distroStatus = "Not checked yet.";
+    private string _distroStatus = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DistroIsReady))]
+    [NotifyPropertyChangedFor(nameof(DistroNeedsAttention))]
+    [NotifyPropertyChangedFor(nameof(DistroIsChecking))]
+    [NotifyPropertyChangedFor(nameof(DistroBannerTitle))]
+    [NotifyPropertyChangedFor(nameof(DistroNextStep))]
+    [NotifyPropertyChangedFor(nameof(DistroStatusIconKey))]
     private bool _isDistroProvisioned;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DistroIsReady))]
+    [NotifyPropertyChangedFor(nameof(DistroNeedsAttention))]
+    [NotifyPropertyChangedFor(nameof(DistroIsChecking))]
+    [NotifyPropertyChangedFor(nameof(DistroBannerTitle))]
+    [NotifyPropertyChangedFor(nameof(DistroNextStep))]
+    [NotifyPropertyChangedFor(nameof(DistroStatusIconKey))]
     private bool _isDistroBusy;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DistroIsReady))]
+    [NotifyPropertyChangedFor(nameof(DistroNeedsAttention))]
+    [NotifyPropertyChangedFor(nameof(DistroIsChecking))]
+    [NotifyPropertyChangedFor(nameof(DistroBannerTitle))]
+    [NotifyPropertyChangedFor(nameof(DistroNextStep))]
+    [NotifyPropertyChangedFor(nameof(DistroStatusIconKey))]
+    private bool _hasCheckedDistro;
 
     [ObservableProperty]
     private string _qwenVersion = "Unknown";
@@ -72,6 +93,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     [ObservableProperty]
     private string? _qwenStatus;
+
+    [ObservableProperty]
+    private bool _qwenStatusIsError;
 
     [ObservableProperty]
     private string _sshPublicKey = string.Empty;
@@ -232,6 +256,32 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     public string LogFilePath => SettingsStore.LogFilePath;
 
+    public bool DistroIsChecking => !HasCheckedDistro || IsDistroBusy;
+
+    public bool DistroIsReady => HasCheckedDistro && IsDistroProvisioned && !IsDistroBusy;
+
+    public bool DistroNeedsAttention => HasCheckedDistro && !IsDistroProvisioned && !IsDistroBusy;
+
+    public string DistroBannerTitle => !HasCheckedDistro
+        ? "Checking the Linux environment…"
+        : IsDistroBusy
+            ? "Working on the Linux environment…"
+            : IsDistroProvisioned
+                ? "Linux environment is ready"
+                : "Linux environment is not set up";
+
+    public string DistroNextStep => DistroIsChecking
+        ? string.Empty
+        : IsDistroProvisioned
+            ? "Next: start the daemon from the Daemon page."
+            : "Next: press \"Set up distro\" to create the Linux environment.";
+
+    public string DistroStatusIconKey => !HasCheckedDistro || IsDistroBusy
+        ? "arrow_sync_regular"
+        : IsDistroProvisioned
+            ? "checkmark_circle_regular"
+            : "warning_regular";
+
     protected override Task OnInitializeAsync()
     {
         WslDistroName = _settings.WslDistroName;
@@ -260,6 +310,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         StartOnLogin = _autostart.IsEnabled();
         UpdateLocalControlPairing(_supervisor.LocalControlPairingUrl);
         RefreshPublisherTrustState();
+
+        // Surface the Linux environment state without waiting on wsl.exe so the page opens instantly.
+        _ = RefreshDistroAsync();
 
         return Task.CompletedTask;
     }
@@ -409,7 +462,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             var exists = await _wsl.DistroExistsAsync(distro, CancellationToken.None);
             if (!exists)
             {
-                DistroStatus = $"The \"{distro}\" distro does not exist yet. Choose Set up distro to create it.";
+                DistroStatus = $"The \"{distro}\" distro does not exist yet.";
                 IsDistroProvisioned = false;
                 return;
             }
@@ -425,6 +478,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         }
         finally
         {
+            HasCheckedDistro = true;
             IsDistroBusy = false;
         }
     }
@@ -442,7 +496,8 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         CommitProfileEdits();
         _settings.Profiles = [.. Profiles];
         IsDistroBusy = true;
-        QwenStatus = "Creating the distro and installing qwen and gh. This takes a few minutes on first run.";
+        QwenStatusIsError = false;
+        QwenStatus = "Creating the distro and installing Qwen and the gh CLI. This takes a few minutes on first run.";
         try
         {
             _provisioner.WriteWslConfig();
@@ -457,10 +512,13 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         catch (Exception ex)
         {
             _logger.LogError(ex, "Provisioning failed.");
+            QwenStatusIsError = true;
             QwenStatus = $"Setup failed: {ex.Message}";
+            DistroStatus = "Setup did not complete.";
         }
         finally
         {
+            HasCheckedDistro = true;
             IsDistroBusy = false;
         }
     }
@@ -540,8 +598,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             var installed = await _provisioner.ReadQwenVersionAsync(distro, profile, QwenExecutable.Trim(), CancellationToken.None);
             QwenVersion = installed ?? "Unknown";
             var latest = await ReadLatestQwenVersionAsync(distro, profile);
+            QwenStatusIsError = false;
             QwenStatus = installed is null
-                ? "qwen is not installed in this profile yet. Choose Update qwen to install it."
+                ? "Qwen is not installed in this profile yet. Choose Update Qwen to install it."
                 : latest is null
                     ? $"Installed version {installed}. Latest version could not be determined."
                     : string.Equals(installed, latest, StringComparison.Ordinal) ? $"Installed version {installed} is up to date." : $"Installed {installed}, latest {latest}.";
@@ -549,6 +608,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         catch (Exception ex)
         {
             _logger.LogError(ex, "Checking the qwen version failed.");
+            QwenStatusIsError = true;
             QwenStatus = $"Could not check for updates: {ex.Message}";
         }
         finally
@@ -562,6 +622,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     {
         IsQwenBusy = true;
         QwenStatus = null;
+        QwenStatusIsError = false;
         try
         {
             var distro = WslDistroName.Trim();
@@ -570,19 +631,21 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             var result = await _provisioner.InstallOrUpdateQwenAsync(distro, profile, CancellationToken.None);
             if (!result.Succeeded)
             {
-                QwenStatus = $"Updating qwen failed: {result.Output}";
+                QwenStatusIsError = true;
+                QwenStatus = $"Updating Qwen failed: {result.Output}";
                 return;
             }
 
             var resolved = await _provisioner.ResolveQwenPathAsync(distro, profile, CancellationToken.None);
             if (resolved is not null) { profile.QwenExecutable = resolved; QwenExecutable = resolved; }
             QwenVersion = await _provisioner.ReadQwenVersionAsync(distro, profile, QwenExecutable.Trim(), CancellationToken.None) ?? "Unknown";
-            QwenStatus = $"qwen is now version {QwenVersion}.";
+            QwenStatus = $"Qwen is now version {QwenVersion}.";
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Updating qwen failed.");
-            QwenStatus = $"Updating qwen failed: {ex.Message}";
+            QwenStatusIsError = true;
+            QwenStatus = $"Updating Qwen failed: {ex.Message}";
         }
         finally
         {

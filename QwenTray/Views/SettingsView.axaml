@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:QwenTray.ViewModels"
+             xmlns:conv="using:QwenTray.Converters"
              xmlns:local="using:QwenTray"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -8,10 +9,59 @@
              x:Class="QwenTray.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
+  <UserControl.Resources>
+    <conv:ResourceKeyToGeometryConverter x:Key="ResourceKeyToGeometryConverter" />
+  </UserControl.Resources>
+
   <UserControl.Styles>
     <Style Selector="TextBlock.field">
       <Setter Property="VerticalAlignment" Value="Top" />
       <Setter Property="Padding" Value="0,6,0,0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="Border.status">
+      <Setter Property="Padding" Value="14,12" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.status.bad">
+      <Setter Property="Background" Value="{DynamicResource SnackbarErrorBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ErrorColor}" />
+    </Style>
+    <Style Selector="Border.status.good">
+      <Setter Property="Background" Value="{DynamicResource SnackbarSuccessBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SuccessColor}" />
+    </Style>
+    <Style Selector="Border.status.neutral">
+      <Setter Property="Background" Value="{DynamicResource BackgroundGrayBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.statusTitle">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.statusDetail">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Border.status.bad TextBlock.statusTitle">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    </Style>
+    <Style Selector="Border.status.good TextBlock.statusTitle">
+      <Setter Property="Foreground" Value="{DynamicResource SuccessColor}" />
+    </Style>
+    <Style Selector="Border.status.neutral TextBlock.statusTitle">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Border.status.bad PathIcon">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    </Style>
+    <Style Selector="Border.status.good PathIcon">
+      <Setter Property="Foreground" Value="{DynamicResource SuccessColor}" />
+    </Style>
+    <Style Selector="Border.status.neutral PathIcon">
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
   </UserControl.Styles>
@@ -24,57 +74,31 @@
         <TextBlock Classes="h1" Text="Settings" />
 
         <Border Classes="Card">
-          <StackPanel Spacing="10">
-            <TextBlock Classes="h2" Text="Daemon" />
-
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
-              <TextBlock Grid.Row="0" Classes="field" Text="qwen executable" />
-              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
-                <TextBox Text="{Binding QwenExecutable}"
-                         ToolTip.Tip="Absolute Linux path to the qwen launcher in the distro." />
-                <TextBlock Classes="caption"
-                           TextWrapping="Wrap"
-                           Text="The daemon is started through wsl.exe as the active profile's Linux user, so this path is a Linux path." />
-              </StackPanel>
-
-              <TextBlock Grid.Row="1" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
-              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
-                <TextBox Text="{Binding Host}" />
-                <TextBlock Classes="caption"
-                           TextWrapping="Wrap"
-                           Text="This is the daemon's main address. 127.0.0.1 keeps it on this PC. A LAN address or 0.0.0.0 makes the main daemon reachable from the network and requires a token." />
-              </StackPanel>
-
-              <TextBlock Grid.Row="2" Classes="field" Text="Port" Margin="0,10,0,0" />
-              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
-            </Grid>
-
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
-              <TextBlock Grid.Row="0" Classes="field" Text="Installed version" />
-              <TextBlock Grid.Row="0" Grid.Column="1" Classes="field" Text="{Binding QwenVersion}" />
-            </Grid>
-
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="Check for updates"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding CheckQwenUpdateCommand}"
-                      IsEnabled="{Binding !IsQwenBusy}" />
-              <Button Content="Update qwen"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding UpdateQwenCommand}"
-                      IsEnabled="{Binding !IsQwenBusy}" />
-            </StackPanel>
-
-            <TextBlock Text="{Binding QwenStatus}"
-                       Classes="caption"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding QwenStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          </StackPanel>
-        </Border>
-
-        <Border Classes="Card">
-          <StackPanel Spacing="10">
+          <StackPanel Spacing="12">
             <TextBlock Classes="h2" Text="Linux environment" />
+
+            <Border Classes="status"
+                    Classes.bad="{Binding DistroNeedsAttention}"
+                    Classes.good="{Binding DistroIsReady}"
+                    Classes.neutral="{Binding DistroIsChecking}">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <PathIcon Width="28"
+                          Height="28"
+                          VerticalAlignment="Center"
+                          Data="{Binding DistroStatusIconKey, Converter={StaticResource ResourceKeyToGeometryConverter}}" />
+                <StackPanel Spacing="3">
+                  <TextBlock Classes="statusTitle" Text="{Binding DistroBannerTitle}" TextWrapping="Wrap" />
+                  <TextBlock Classes="statusDetail"
+                             Text="{Binding DistroStatus}"
+                             TextWrapping="Wrap"
+                             IsVisible="{Binding DistroStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock Classes="caption"
+                             Text="{Binding DistroNextStep}"
+                             TextWrapping="Wrap"
+                             IsVisible="{Binding DistroNextStep, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
 
             <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
               <TextBlock Grid.Row="0" Classes="field" Text="WSL distro" />
@@ -82,12 +106,11 @@
                 <TextBox Text="{Binding WslDistroName}" />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="QwenTray creates and owns this distro. Windows interop and drive mounting are turned off, so the daemon cannot read C: or run Windows binaries." />
-                <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding DistroStatus}" />
+                           Text="QwenTray creates and owns this distro. Windows apps and drives are not available inside it." />
               </StackPanel>
             </Grid>
 
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
               <Button Content="Check status"
                       Classes="Primary VariantOutlined"
                       Command="{Binding RefreshDistroCommand}"
@@ -100,7 +123,11 @@
                       Classes="Primary VariantOutlined"
                       Command="{Binding OpenInWindowsTerminalCommand}" />
             </StackPanel>
+          </StackPanel>
+        </Border>
 
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Identity profiles" />
 
             <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
@@ -124,7 +151,7 @@
                 <TextBox Text="{Binding ProfileLinuxUser}" />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="The Linux user is the identity. Its home directory holds this profile's ssh key, gh token, git config, and Qwen Code configuration." />
+                           Text="The Linux user is this profile's identity. Its home holds the ssh key, gh token, git config, and Qwen Code settings." />
               </StackPanel>
             </Grid>
 
@@ -141,14 +168,65 @@
               <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding NewProfileUser}" />
             </Grid>
 
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
               <Button Content="Add profile" Classes="Primary VariantOutlined" Command="{Binding AddProfileCommand}" />
               <Button Content="Remove profile" Classes="Primary VariantOutlined" Command="{Binding RemoveProfileCommand}" />
             </StackPanel>
 
             <TextBlock Classes="caption"
                        TextWrapping="Wrap"
-                       Text="Adding a profile and pressing Set up distro creates the Linux user in the distro. Changing the active profile and saving restarts the daemon as that identity." />
+                       Text="Press Set up distro to create a new profile's Linux user. Saving with a different active profile restarts the daemon as that identity." />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Daemon" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Qwen executable" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding QwenExecutable}"
+                         ToolTip.Tip="Absolute Linux path to the Qwen launcher in the distro." />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The daemon runs inside the WSL distro as the active profile's Linux user, so this is a Linux path." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding Host}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The daemon's main address. 127.0.0.1 keeps it on this PC. A LAN address or 0.0.0.0 exposes it to the network and needs a token." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Port" Margin="0,10,0,0" />
+              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
+            </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Installed version" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Classes="field" Text="{Binding QwenVersion}" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="Check for updates"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding CheckQwenUpdateCommand}"
+                      IsEnabled="{Binding !IsQwenBusy}" />
+              <Button Content="Update Qwen"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding UpdateQwenCommand}"
+                      IsEnabled="{Binding !IsQwenBusy}" />
+            </StackPanel>
+
+            <TextBlock Text="{Binding QwenStatus}"
+                       Classes="caption"
+                       Classes.Error="{Binding QwenStatusIsError}"
+                       TextWrapping="Wrap"
+                       Margin="0,4,0,0"
+                       IsVisible="{Binding QwenStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Border>
 
@@ -228,9 +306,9 @@
                      FontFamily="Consolas,Menlo,monospace" />
             <TextBlock Classes="caption"
                        TextWrapping="Wrap"
-                       Text="One entry per line, relative to ~/.qwen. settings.json and projects are never synced: settings.json holds per-machine secrets, and projects is keyed by absolute path." />
+                       Text="One entry per line, relative to ~/.qwen. settings.json and projects are never synced." />
 
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
               <Button Content="Push to distro"
                       Classes="Primary VariantOutlined"
                       Command="{Binding PushConfigCommand}"
@@ -273,7 +351,7 @@
                 </Grid>
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="Empty means no token, which is safe only while the daemon is bound to loopback. A non-loopback bind with no token makes the daemon generate an ephemeral one." />
+                           Text="Leave empty for a loopback-only daemon. A non-loopback bind needs a token." />
               </StackPanel>
 
               <CheckBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0"
@@ -288,7 +366,7 @@
                          MinHeight="52" />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="One per line. Needed behind a TLS-terminating proxy, because the browser origin does not match the daemon's own address." />
+                           Text="One per line. Needed behind a TLS-terminating proxy." />
               </StackPanel>
 
               <TextBlock Grid.Row="3" Classes="field" Text="TLS cert path" Margin="0,10,0,0" />
@@ -299,7 +377,7 @@
                 <TextBox Text="{Binding TlsKeyPath}" />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="Both or neither. Setting them switches the daemon and the health check to https." />
+                           Text="Set both or neither. Enables https for the daemon and health check." />
               </StackPanel>
             </Grid>
           </StackPanel>
@@ -321,10 +399,7 @@
                         IsChecked="{Binding LocalControl}" />
               <TextBlock Classes="caption"
                          TextWrapping="Wrap"
-                         Text="Keep the main address above at 127.0.0.1. Qwen Code opens a separate connection on one private IPv4 interface. Save these settings. If the daemon is stopped, start it from the Daemon page. Then scan the QR code below with a phone on the same trusted network. The link grants access to the Web Shell, so share it only with devices you trust." />
-              <TextBlock Classes="caption"
-                         TextWrapping="Wrap"
-                         Text="Changing the main address to a LAN address is different. It exposes the daemon's main endpoint to that network and requires a bearer token. Do not enable both options together. The Web Shell must also be enabled for device pairing." />
+                         Text="Pairs a phone over a separate private connection on one IPv4 interface. Keep the main address at 127.0.0.1, enable the Web Shell, then scan the QR code below. Do not combine with a LAN bind." />
               <Border Background="{DynamicResource SurfaceBrush}" Padding="12" CornerRadius="8"
                       IsVisible="{Binding HasLocalControlPairingQr}">
                 <StackPanel Spacing="8">
@@ -336,7 +411,7 @@
               <TextBlock Classes="caption"
                          TextWrapping="Wrap"
                          IsVisible="{Binding ShowLocalControlPairingPending}"
-                         Text="No pairing QR is available. Check that the daemon is running, Local Control is active, and QwenTray can read the pairing information." />
+                         Text="No pairing QR yet. Start the daemon from the Daemon page, then check that Local Control is active." />
             </StackPanel>
           </StackPanel>
         </Border>
@@ -394,7 +469,7 @@
 
             <TextBlock Classes="caption"
                        TextWrapping="Wrap"
-                       Text="QwenTray builds are signed with a self-signed Bitbound certificate. Windows only trusts certificate authorities from the public web, so add the certificate's public key to this user's certificate store to have signatures validate and Explorer name Bitbound as the publisher." />
+                       Text="QwenTray builds are signed with a self-signed Bitbound certificate. Add its public key to this user's store so signatures validate and Explorer shows Bitbound as the publisher." />
 
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button Content="Trust Bitbound publisher"
@@ -434,7 +509,7 @@
                        TextWrapping="Wrap"
                        Text="One argument per line, appended to the spawn command verbatim. Use this for flags this page does not surface." />
 
-            <TextBlock Classes="h2" Text="Diagnostics" />
+            <TextBlock Classes="h2" Text="Diagnostics" Margin="0,8,0,0" />
 
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button Content="Open daemon log"
