@@ -45,9 +45,10 @@
       <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="#F22B2B2B" />
       <SolidColorBrush x:Key="OverlayBorderBrush" Color="#33FFFFFF" />
 
-      <SolidColorBrush x:Key="SnackbarInfoBrush" Color="#F22B2B2B" />
-      <SolidColorBrush x:Key="SnackbarSuccessBrush" Color="#F21E3A2C" />
-      <SolidColorBrush x:Key="SnackbarErrorBrush" Color="#F23A1E22" />
+      <SolidColorBrush x:Key="SnackbarInfoBrush" Color="#F2102A44" />
+      <SolidColorBrush x:Key="SnackbarSuccessBrush" Color="#F214512F" />
+      <SolidColorBrush x:Key="SnackbarWarningBrush" Color="#F24A3A0E" />
+      <SolidColorBrush x:Key="SnackbarErrorBrush" Color="#F2501C22" />
       <SolidColorBrush x:Key="SnackbarTextBrush" Color="#F2FFFFFF" />
     </ResourceDictionary>
 
@@ -92,9 +93,10 @@
       <SolidColorBrush x:Key="OverlayBackgroundBrush" Color="#F2FFFFFF" />
       <SolidColorBrush x:Key="OverlayBorderBrush" Color="#33000000" />
 
-      <SolidColorBrush x:Key="SnackbarInfoBrush" Color="#F2FFFFFF" />
-      <SolidColorBrush x:Key="SnackbarSuccessBrush" Color="#F2E6F5EC" />
-      <SolidColorBrush x:Key="SnackbarErrorBrush" Color="#F2FBEAEC" />
+      <SolidColorBrush x:Key="SnackbarInfoBrush" Color="#F2E9F2FE" />
+      <SolidColorBrush x:Key="SnackbarSuccessBrush" Color="#F2D3F0DD" />
+      <SolidColorBrush x:Key="SnackbarWarningBrush" Color="#F2FBEFD4" />
+      <SolidColorBrush x:Key="SnackbarErrorBrush" Color="#F2FADFE2" />
       <SolidColorBrush x:Key="SnackbarTextBrush" Color="#F2000000" />
     </ResourceDictionary>
 

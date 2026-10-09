@@ -1,0 +1,62 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:services="using:QwenTray.Services"
+        x:Class="QwenTray.Views.ConfirmDialog"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="460" d:DesignHeight="200"
+        x:DataType="services:ConfirmDialogRequest"
+        Title="{Binding Title}"
+        SizeToContent="WidthAndHeight"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BackgroundBrush}"
+        Padding="20">
+
+  <Window.Styles>
+    <Style Selector="PathIcon.danger">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    </Style>
+
+    <Style Selector="Button.danger.VariantFilled">
+      <Setter Property="Background" Value="{DynamicResource ErrorColor}" />
+      <Setter Property="Foreground" Value="{DynamicResource ErrorContrastText}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+
+    <Style Selector="Button.danger.VariantFilled:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource ErrorFilledHoverBrush}" />
+    </Style>
+  </Window.Styles>
+
+  <StackPanel Spacing="14" MinWidth="380" MaxWidth="460">
+    <StackPanel Orientation="Horizontal" Spacing="10">
+      <PathIcon x:Name="Glyph"
+                Width="22"
+                Height="22"
+                VerticalAlignment="Center"
+                Data="{StaticResource alert_regular}" />
+      <TextBlock Classes="h2" Text="{Binding Title}" TextWrapping="Wrap" VerticalAlignment="Center" />
+    </StackPanel>
+
+    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimaryBrush}" />
+
+    <TextBlock x:Name="DetailText"
+               Classes="caption"
+               TextWrapping="Wrap"
+               Text="{Binding Detail}" />
+
+    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,6,0,0">
+      <Button x:Name="CancelButton"
+              Content="Cancel"
+              Classes="Default VariantOutlined"
+              Click="OnCancel" />
+      <Button x:Name="ConfirmButton"
+              Content="{Binding ConfirmLabel}"
+              Classes="Primary VariantFilled"
+              Click="OnConfirm" />
+    </StackPanel>
+  </StackPanel>
+
+</Window>

@@ -78,10 +78,11 @@ public partial class MainWindowViewModel : ViewModelBase<MainWindow>, IMainWindo
     {
         try
         {
-            Process.Start(new ProcessStartInfo(_settings.WebUri.ToString()) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(_settings.WebShellUri.ToString()) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
+            // The address is logged without its fragment so the bearer token stays out of the log.
             _logger.LogError(ex, "Could not open the web shell at {WebUri}.", _settings.WebUri);
         }
     }

@@ -34,6 +34,14 @@
       <Setter Property="TextWrapping" Value="Wrap" />
       <Setter Property="TextTrimming" Value="CharacterEllipsis" />
     </Style>
+
+    <!-- Fills a cell of the shortcuts grid, so the labels line up on one left edge. -->
+    <Style Selector="Button.Shortcut">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Margin" Value="0,0,8,8" />
+      <Setter Property="Padding" Value="12,9" />
+    </Style>
   </UserControl.Styles>
 
   <ScrollViewer Margin="20">
@@ -107,28 +115,49 @@
       </Border>
 
       <Border Classes="Card">
-        <StackPanel Spacing="10">
-          <TextBlock Classes="h2" Text="Web Shell" />
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="3">
+            <TextBlock Classes="h2" Text="Shortcuts" />
+            <TextBlock Classes="caption" Text="{Binding WebUrl}" />
+          </StackPanel>
 
-          <TextBlock Classes="value" Text="{Binding WebUrl}" />
-
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Classes="Primary VariantOutlined"
-                    Command="{Binding OpenWebShellCommand}">
+          <UniformGrid Columns="2" Rows="2">
+            <Button Classes="Primary VariantOutlined Shortcut"
+                    Command="{Binding OpenWebShellCommand}"
+                    ToolTip.Tip="The daemon's own web UI, with the bearer token passed in the address.">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <PathIcon Data="{StaticResource open_regular}" />
                 <TextBlock Text="Open in browser" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
 
-            <Button Classes="Default VariantOutlined"
-                    Command="{Binding OpenLogCommand}">
+            <Button Classes="Default VariantOutlined Shortcut"
+                    Command="{Binding OpenInWindowsTerminalCommand}"
+                    ToolTip.Tip="A shell inside the distro, as the active profile.">
               <StackPanel Orientation="Horizontal" Spacing="8">
-                <PathIcon Data="{StaticResource open_regular}" />
+                <PathIcon Data="{StaticResource keyboard_regular}" />
+                <TextBlock Text="Open in Windows Terminal" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+
+            <Button Classes="Default VariantOutlined Shortcut"
+                    Command="{Binding OpenLogCommand}"
+                    ToolTip.Tip="The log the running daemon writes inside the distro.">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <PathIcon Data="{StaticResource document_regular}" />
                 <TextBlock Text="Open daemon log" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
-          </StackPanel>
+
+            <Button Classes="Default VariantOutlined Shortcut"
+                    Command="{Binding OpenTrayFolderCommand}"
+                    ToolTip.Tip="This tray's own log and settings.json, on Windows.">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <PathIcon Data="{StaticResource folder_regular}" />
+                <TextBlock Text="Open QwenTray folder" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </UniformGrid>
         </StackPanel>
       </Border>
 

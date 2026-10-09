@@ -21,6 +21,9 @@ public interface IWslDistro
     Task<WslCommandResult> InstallDistroAsync(string distro, CancellationToken cancellationToken);
     Task<WslCommandResult> TerminateAsync(string distro, CancellationToken cancellationToken);
 
+    /// <summary>Removes the distro and its entire filesystem. This cannot be undone.</summary>
+    Task<WslCommandResult> UnregisterAsync(string distro, CancellationToken cancellationToken);
+
     /// <summary>Starts the daemon as the given Linux user and returns the wsl.exe host process.</summary>
     IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile);
 }
@@ -80,6 +83,9 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
     public async Task<WslCommandResult> TerminateAsync(string distro, CancellationToken cancellationToken)
         => await ExecuteAsync(TerminateInvocation(distro), input: null, cancellationToken);
 
+    public async Task<WslCommandResult> UnregisterAsync(string distro, CancellationToken cancellationToken)
+        => await ExecuteAsync(UnregisterInvocation(distro), input: null, cancellationToken);
+
     public IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile)
     {
         var invocation = DaemonInvocation(settings, distro, profile);
@@ -105,12 +111,15 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
     internal static WslInvocation TerminateInvocation(string distro)
         => new(BuildArguments(["--terminate", distro]), WslOutputEncoding);
 
+    internal static WslInvocation UnregisterInvocation(string distro)
+        => new(BuildArguments(["--unregister", distro]), WslOutputEncoding);
+
     /// <summary>A command run inside the distro. Its stdout is the child's, so it is UTF-8.</summary>
     internal static WslInvocation ScriptInvocation(string distro, string user, string script)
         => new(BuildArguments(BuildScriptCommand(distro, user, script)), CommandOutputEncoding);
 
     internal static WslInvocation DaemonInvocation(Settings settings, string distro, IdentityProfile profile)
-        => new(BuildArguments(DaemonSupervisor.BuildArguments(settings, distro, profile)), CommandOutputEncoding);
+        => new(BuildArguments(BuildDaemonCommand(distro, profile.LinuxUser, DaemonSupervisor.BuildServeArguments(settings, profile))), CommandOutputEncoding);
 
     /// <summary>
     /// Builds a command that runs <paramref name="script"/> through bash. The <c>-e</c> flag passes
@@ -119,6 +128,19 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
     /// </summary>
     internal static IReadOnlyList<string> BuildScriptCommand(string distro, string user, string script)
         => ["-d", distro, "-u", user, "-e", UnixProgram, "-lc", script];
+
+    /// <summary>
+    /// The daemon is launched through bash with its stderr folded into stdout, because the log-path
+    /// banner it prints on startup goes to stderr and the process abstraction only surfaces stdout.
+    /// Every argument is single-quoted, so nothing the settings page holds can be read as shell syntax.
+    /// </summary>
+    internal static IReadOnlyList<string> BuildDaemonCommand(string distro, string user, IReadOnlyList<string> serveArguments)
+        => ["-d", distro, "-u", user, "-e", UnixProgram, "-lc", BuildDaemonScript(serveArguments)];
+
+    internal static string BuildDaemonScript(IReadOnlyList<string> serveArguments)
+        => $"exec {string.Join(' ', serveArguments.Select(QuotePosix))} 2>&1";
+
+    internal static string QuotePosix(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
 
     internal static string BuildArguments(IReadOnlyList<string> arguments)
         => string.Join(' ', arguments.Select(QuoteArgument));

@@ -87,6 +87,16 @@
     <Setter Property="BorderBrush" Value="Transparent" />
   </Style>
 
+  <Style Selector="Button.Error.VariantOutlined">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ErrorColor}" />
+  </Style>
+
+  <Style Selector="Button.Error.VariantOutlined:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource SnackbarErrorBrush}" />
+  </Style>
+
   <Style Selector="Button.Error.VariantFilled:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource ErrorFilledHoverBrush}" />
   </Style>

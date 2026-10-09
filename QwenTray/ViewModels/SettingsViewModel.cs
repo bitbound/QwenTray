@@ -6,7 +6,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
-using Bitbound.SystemAbstractions.FileSystem;
 using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.Logging;
 using QRCoder;
@@ -28,8 +27,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private readonly WslDistroProvisioner _provisioner;
     private readonly IdentityService _identity;
     private readonly WslConfigSyncService _sync;
-    private readonly IFileSystem _fileSystem;
     private readonly IProcessManager _processes;
+    private readonly ISnackbarService _snackbars;
+    private readonly IConfirmDialogService _confirm;
     private readonly ILogger<SettingsViewModel> _logger;
 
     [ObservableProperty]
@@ -59,12 +59,25 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string _distroStatus = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DistroIsChecking))]
+    [NotifyPropertyChangedFor(nameof(CanSetupDistro))]
+    [NotifyPropertyChangedFor(nameof(CanRebuildDistro))]
+    [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
+    [NotifyPropertyChangedFor(nameof(SetupDistroLabel))]
+    [NotifyPropertyChangedFor(nameof(SetupDistroHelp))]
+    private bool _distroExists;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DistroIsReady))]
     [NotifyPropertyChangedFor(nameof(DistroNeedsAttention))]
     [NotifyPropertyChangedFor(nameof(DistroIsChecking))]
     [NotifyPropertyChangedFor(nameof(DistroBannerTitle))]
     [NotifyPropertyChangedFor(nameof(DistroNextStep))]
     [NotifyPropertyChangedFor(nameof(DistroStatusIconKey))]
+    [NotifyPropertyChangedFor(nameof(CanRebuildDistro))]
+    [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
+    [NotifyPropertyChangedFor(nameof(SetupDistroLabel))]
+    [NotifyPropertyChangedFor(nameof(SetupDistroHelp))]
     private bool _isDistroProvisioned;
 
     [ObservableProperty]
@@ -74,16 +87,21 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     [NotifyPropertyChangedFor(nameof(DistroBannerTitle))]
     [NotifyPropertyChangedFor(nameof(DistroNextStep))]
     [NotifyPropertyChangedFor(nameof(DistroStatusIconKey))]
+    [NotifyPropertyChangedFor(nameof(CanSetupDistro))]
+    [NotifyPropertyChangedFor(nameof(CanRebuildDistro))]
+    [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
     private bool _isDistroBusy;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(DistroIsReady))]
-    [NotifyPropertyChangedFor(nameof(DistroNeedsAttention))]
     [NotifyPropertyChangedFor(nameof(DistroIsChecking))]
     [NotifyPropertyChangedFor(nameof(DistroBannerTitle))]
-    [NotifyPropertyChangedFor(nameof(DistroNextStep))]
     [NotifyPropertyChangedFor(nameof(DistroStatusIconKey))]
     private bool _hasCheckedDistro;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SetupDistroLabel))]
+    [NotifyPropertyChangedFor(nameof(SetupDistroHelp))]
+    private string? _distroProgress;
 
     [ObservableProperty]
     private string _qwenVersion = "Unknown";
@@ -92,43 +110,36 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private bool _isQwenBusy;
 
     [ObservableProperty]
-    private string? _qwenStatus;
-
-    [ObservableProperty]
-    private bool _qwenStatusIsError;
+    private string? _qwenProgress;
 
     [ObservableProperty]
     private string _sshPublicKey = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasIdentityKeys))]
     private bool _hasSshPublicKey;
-
-    [ObservableProperty]
-    private string? _sshStatus;
 
     [ObservableProperty]
     private string _gpgPublicKey = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasIdentityKeys))]
     private bool _hasGpgPublicKey;
-
-    [ObservableProperty]
-    private string? _gpgStatus;
 
     [ObservableProperty]
     private string _gitHubToken = string.Empty;
 
     [ObservableProperty]
-    private string _gitHubStatus = "Unknown";
+    private string _gitHubAccountText = "Unknown";
 
     [ObservableProperty]
     private bool _isGitHubBusy;
 
     [ObservableProperty]
-    private string _syncEntries = string.Empty;
+    private bool _isIdentityBusy;
 
     [ObservableProperty]
-    private string? _syncStatus;
+    private string _syncEntries = string.Empty;
 
     [ObservableProperty]
     private bool _isSyncing;
@@ -223,9 +234,6 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     [ObservableProperty]
     private bool _isTrustingPublisher;
 
-    [ObservableProperty]
-    private string? _publisherTrustMessage;
-
     // The hold and fade lengths have to agree with the OpacityTransition on the save message in SettingsView.axaml.
     private static readonly TimeSpan SaveMessageHold = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan SaveMessageFade = TimeSpan.FromMilliseconds(300);
@@ -242,8 +250,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         WslDistroProvisioner provisioner,
         IdentityService identity,
         WslConfigSyncService sync,
-        IFileSystem fileSystem,
         IProcessManager processes,
+        ISnackbarService snackbars,
+        IConfirmDialogService confirm,
         ILogger<SettingsViewModel> logger)
     {
         _settings = settings;
@@ -255,8 +264,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _provisioner = provisioner;
         _identity = identity;
         _sync = sync;
-        _fileSystem = fileSystem;
         _processes = processes;
+        _snackbars = snackbars;
+        _confirm = confirm;
         _logger = logger;
         _supervisor.LocalControlPairingUrlChanged += OnLocalControlPairingUrlChanged;
     }
@@ -270,6 +280,28 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     public bool DistroIsReady => HasCheckedDistro && IsDistroProvisioned && !IsDistroBusy;
 
     public bool DistroNeedsAttention => HasCheckedDistro && !IsDistroProvisioned && !IsDistroBusy;
+
+    public bool CanSetupDistro => !IsDistroBusy;
+
+    public bool CanRebuildDistro => DistroExists && !IsDistroBusy;
+
+    public bool CanDeleteDistro => DistroExists && !IsDistroBusy;
+
+    public bool HasIdentityKeys => HasSshPublicKey || HasGpgPublicKey;
+
+    /// <summary>
+    /// Re-running the setup on a distro that already exists is a repair, not a rebuild, so the label
+    /// says which of the two the button is about to do.
+    /// </summary>
+    public string SetupDistroLabel => DistroExists && IsDistroProvisioned ? "Re-run setup" : "Set up distro";
+
+    public string SetupDistroHelp => DistroProgress is not null
+        ? "The distro is being worked on. Leave this page open until it finishes."
+        : !DistroExists
+            ? "Creates the distro, installs Qwen and the gh CLI, and adds a Linux user for every profile."
+            : IsDistroProvisioned
+                ? "Adds any profile that is missing its Linux user and reinstalls Qwen and the gh CLI. It deletes nothing, so re-running it is safe."
+                : "Finishes what this distro is missing: the isolation settings, Qwen, the gh CLI, and a Linux user for every profile.";
 
     public string DistroBannerTitle => !HasCheckedDistro
         ? "Checking the Linux environment…"
@@ -320,8 +352,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         UpdateLocalControlPairing(_supervisor.LocalControlPairingUrl);
         RefreshPublisherTrustState();
 
-        // Surface the Linux environment state without waiting on wsl.exe so the page opens instantly.
-        _ = RefreshDistroAsync();
+        // Surface the Linux environment state and the profile's keys without waiting on wsl.exe, so
+        // the page opens instantly and fills in as the distro answers.
+        _ = RefreshEnvironmentAsync();
 
         return Task.CompletedTask;
     }
@@ -461,6 +494,15 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         ScheduleSaveMessageFadeOut();
     }
 
+    private async Task RefreshEnvironmentAsync()
+    {
+        await RefreshDistroAsync();
+        if (IsDistroProvisioned)
+        {
+            await LoadIdentityCoreAsync(announce: false);
+        }
+    }
+
     [RelayCommand]
     private async Task RefreshDistroAsync()
     {
@@ -469,6 +511,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         {
             var distro = WslDistroName.Trim();
             var exists = await _wsl.DistroExistsAsync(distro, CancellationToken.None);
+            DistroExists = exists;
             if (!exists)
             {
                 DistroStatus = $"The \"{distro}\" distro does not exist yet.";
@@ -483,6 +526,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         {
             _logger.LogError(ex, "Checking the distro failed.");
             DistroStatus = $"Could not check the distro: {ex.Message}";
+            DistroExists = false;
             IsDistroProvisioned = false;
         }
         finally
@@ -493,37 +537,109 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     }
 
     [RelayCommand]
-    private async Task SetupDistroAsync()
+    private Task SetupDistroAsync() => ProvisionAsync(rebuild: false);
+
+    [RelayCommand]
+    private async Task RebuildDistroAsync()
+    {
+        var distro = WslDistroName.Trim();
+        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
+            $"Rebuild the \"{distro}\" distro?",
+            "The current distro is deleted and a fresh one is created under the same name, then set up again.",
+            "Rebuild",
+            "Everything inside is destroyed and does not come back on its own: every profile's ssh and signing keys, GitHub sign-ins, workspaces, and Qwen configuration. The daemon is stopped first."));
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await ProvisionAsync(rebuild: true);
+    }
+
+    /// <summary>
+    /// Creates or repairs the distro. A rebuild takes the same path after deleting it, so the two stay
+    /// honest about producing the same result.
+    /// </summary>
+    private async Task ProvisionAsync(bool rebuild)
     {
         var distro = WslDistroName.Trim();
         if (string.IsNullOrWhiteSpace(distro))
         {
-            SaveError = "Set the WSL distro name first.";
+            _snackbars.Show("Set the WSL distro name first.", SnackbarKind.Error);
             return;
         }
 
         CommitProfileEdits();
         _settings.Profiles = [.. Profiles];
         IsDistroBusy = true;
-        QwenStatusIsError = false;
-        QwenStatus = "Creating the distro and installing Qwen and the gh CLI. This takes a few minutes on first run.";
+        DistroProgress = rebuild
+            ? "Deleting the old distro and building a new one, then installing Qwen and the gh CLI. This takes a few minutes."
+            : "Creating the distro and installing Qwen and the gh CLI. This takes a few minutes on first run.";
         try
         {
+            await StopDaemonForDistroChangeAsync();
             _provisioner.WriteWslConfig();
-            await _provisioner.ProvisionAsync(distro, _settings.Profiles, CancellationToken.None);
+            if (rebuild)
+            {
+                await _provisioner.RebuildAsync(distro, _settings.Profiles, CancellationToken.None);
+            }
+            else
+            {
+                await _provisioner.ProvisionAsync(distro, _settings.Profiles, CancellationToken.None);
+            }
+
             var resolved = await _provisioner.ResolveQwenPathAsync(distro, _settings.ResolveActiveProfile(), CancellationToken.None);
             if (resolved is not null) _settings.ResolveActiveProfile().QwenExecutable = resolved;
+            DistroExists = true;
             IsDistroProvisioned = true;
             DistroStatus = $"The \"{distro}\" distro is set up.";
-            QwenStatus = "Setup complete. Sign in to Windows again or run 'wsl --shutdown' so the mirrored networking change takes effect.";
             _settingsStore.Save(_settings);
+            _snackbars.Show($"{(rebuild ? "Rebuilt" : "Set up")} the \"{distro}\" distro. Sign in to Windows again or run 'wsl --shutdown' so the mirrored networking change takes effect.", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Provisioning failed.");
-            QwenStatusIsError = true;
-            QwenStatus = $"Setup failed: {ex.Message}";
+            _logger.LogError(ex, "Provisioning the distro failed.");
             DistroStatus = "Setup did not complete.";
+            _snackbars.Show($"Setup failed: {ex.Message}", SnackbarKind.Error);
+            IsDistroProvisioned = false;
+        }
+        finally
+        {
+            DistroProgress = null;
+            HasCheckedDistro = true;
+            IsDistroBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task DeleteDistroAsync()
+    {
+        var distro = WslDistroName.Trim();
+        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
+            $"Delete the \"{distro}\" distro?",
+            "The distro is unregistered and its filesystem is discarded. Nothing is created afterwards, so QwenTray goes back to needing a setup.",
+            "Delete distro",
+            "This destroys every profile's ssh and signing keys, GitHub sign-ins, workspaces, and Qwen configuration inside it. Keys you added to GitHub have to be removed there by hand."));
+        if (!confirmed)
+        {
+            return;
+        }
+
+        IsDistroBusy = true;
+        try
+        {
+            await StopDaemonForDistroChangeAsync();
+            await _provisioner.DeleteAsync(distro, CancellationToken.None);
+            DistroExists = false;
+            IsDistroProvisioned = false;
+            DistroStatus = $"The \"{distro}\" distro has been deleted.";
+            ClearIdentity();
+            _snackbars.Show($"Deleted the \"{distro}\" distro.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Deleting the distro failed.");
+            _snackbars.Show($"Could not delete the distro: {ex.Message}", SnackbarKind.Error);
         }
         finally
         {
@@ -532,26 +648,13 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         }
     }
 
-    [RelayCommand]
-    private void OpenInWindowsTerminal()
+    // wsl refuses to unregister a running distro, and a daemon writing into a distro that is about to
+    // be deleted would lose its log the same way.
+    private async Task StopDaemonForDistroChangeAsync()
     {
-        var distro = WslDistroName.Trim();
-        var profile = _settings.ResolveActiveProfile();
-        if (!IsSafeDistroName(distro) || !IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
+        if (_supervisor.State is DaemonState.Starting or DaemonState.Running)
         {
-            _logger.LogWarning("Cannot open a terminal for distro {Distro} and user {User}: the names are not valid.", distro, profile.LinuxUser);
-            DistroStatus = "Fix the distro name or Linux user before opening a terminal.";
-            return;
-        }
-
-        try
-        {
-            _processes.Start("wt.exe", $"wsl.exe -d {distro} -u {profile.LinuxUser}", useShellExec: true);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Windows Terminal could not be started; falling back to wsl.exe.");
-            _processes.Start("wsl.exe", $"-d {distro} -u {profile.LinuxUser}", useShellExec: true);
+            await _supervisor.StopAsync();
         }
     }
 
@@ -580,6 +683,43 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         NewProfileUser = string.Empty;
     }
 
+    /// <summary>
+    /// Clones the selected profile's settings into a new Linux user. Credentials are deliberately not
+    /// copied: a profile with the same keys and token would be the same identity, not a second one.
+    /// </summary>
+    [RelayCommand]
+    private void DuplicateProfile()
+    {
+        var source = SelectedProfile;
+        if (source is null)
+        {
+            _snackbars.Show("Select a profile to duplicate first.", SnackbarKind.Warning);
+            return;
+        }
+
+        var name = string.IsNullOrWhiteSpace(NewProfileName) ? $"{source.Name} copy" : NewProfileName.Trim();
+        var user = string.IsNullOrWhiteSpace(NewProfileUser) ? SlugifyLinuxUser(name) : NewProfileUser.Trim().ToLowerInvariant();
+        if (!IsValidLinuxUser(user))
+        {
+            SaveError = $"\"{user}\" is not a valid Linux user name. Use lowercase letters, digits, underscore, or hyphen, and start with a letter.";
+            return;
+        }
+        if (Profiles.Any(profile => string.Equals(profile.LinuxUser, user, StringComparison.Ordinal)))
+        {
+            SaveError = $"A profile already uses the Linux user \"{user}\".";
+            return;
+        }
+
+        var id = SlugifyLinuxUser(name);
+        if (Profiles.Any(profile => string.Equals(profile.Id, id, StringComparison.Ordinal))) id = $"{id}-{Profiles.Count + 1}";
+        var created = new IdentityProfile { Id = id, Name = name, LinuxUser = user, WorkspaceDirectory = $"/home/{user}/workspace" };
+        Profiles.Add(created);
+        SelectedProfile = created;
+        NewProfileName = string.Empty;
+        NewProfileUser = string.Empty;
+        _snackbars.Show($"Created \"{name}\" from \"{source.Name}\". Its Linux user, keys, and token are empty until you set up the distro and save.", SnackbarKind.Success);
+    }
+
     [RelayCommand]
     private void RemoveProfile()
     {
@@ -599,6 +739,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private async Task CheckQwenUpdateAsync()
     {
         IsQwenBusy = true;
+        QwenProgress = "Reading the installed and latest versions…";
         try
         {
             var distro = WslDistroName.Trim();
@@ -606,22 +747,29 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
             var installed = await _provisioner.ReadQwenVersionAsync(distro, profile, QwenExecutable.Trim(), CancellationToken.None);
             QwenVersion = installed ?? "Unknown";
-            var latest = await ReadLatestQwenVersionAsync(distro, profile);
-            QwenStatusIsError = false;
-            QwenStatus = installed is null
-                ? "Qwen is not installed in this profile yet. Choose Update Qwen to install it."
-                : latest is null
-                    ? $"Installed version {installed}. Latest version could not be determined."
-                    : string.Equals(installed, latest, StringComparison.Ordinal) ? $"Installed version {installed} is up to date." : $"Installed {installed}, latest {latest}.";
+            var latest = await _provisioner.ReadLatestQwenVersionAsync(distro, profile, CancellationToken.None);
+            if (installed is null)
+            {
+                _snackbars.Show("Qwen is not installed for this profile yet. Choose Update Qwen to install it.", SnackbarKind.Warning);
+            }
+            else if (latest is null)
+            {
+                _snackbars.Show($"Installed version {installed}. The latest version could not be determined.", SnackbarKind.Warning);
+            }
+            else
+            {
+                var upToDate = string.Equals(installed, latest, StringComparison.Ordinal);
+                _snackbars.Show(upToDate ? $"Version {installed} is up to date." : $"Installed {installed}, latest {latest}.", upToDate ? SnackbarKind.Success : SnackbarKind.Info);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Checking the qwen version failed.");
-            QwenStatusIsError = true;
-            QwenStatus = $"Could not check for updates: {ex.Message}";
+            _snackbars.Show($"Could not check for updates: {ex.Message}", SnackbarKind.Error);
         }
         finally
         {
+            QwenProgress = null;
             IsQwenBusy = false;
         }
     }
@@ -630,8 +778,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private async Task UpdateQwenAsync()
     {
         IsQwenBusy = true;
-        QwenStatus = null;
-        QwenStatusIsError = false;
+        QwenProgress = "Installing or updating Qwen in the distro…";
         try
         {
             var distro = WslDistroName.Trim();
@@ -640,82 +787,217 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             var result = await _provisioner.InstallOrUpdateQwenAsync(distro, profile, CancellationToken.None);
             if (!result.Succeeded)
             {
-                QwenStatusIsError = true;
-                QwenStatus = $"Updating Qwen failed: {result.Output}";
+                _snackbars.Show($"Updating Qwen failed: {result.Output}", SnackbarKind.Error);
                 return;
             }
 
             var resolved = await _provisioner.ResolveQwenPathAsync(distro, profile, CancellationToken.None);
             if (resolved is not null) { profile.QwenExecutable = resolved; QwenExecutable = resolved; }
             QwenVersion = await _provisioner.ReadQwenVersionAsync(distro, profile, QwenExecutable.Trim(), CancellationToken.None) ?? "Unknown";
-            QwenStatus = $"Qwen is now version {QwenVersion}.";
+            _snackbars.Show($"Qwen is now version {QwenVersion}.", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Updating qwen failed.");
-            QwenStatusIsError = true;
-            QwenStatus = $"Updating Qwen failed: {ex.Message}";
+            _snackbars.Show($"Updating Qwen failed: {ex.Message}", SnackbarKind.Error);
         }
         finally
         {
+            QwenProgress = null;
             IsQwenBusy = false;
         }
     }
 
     [RelayCommand]
-    private async Task LoadIdentityAsync()
+    private Task LoadIdentityAsync() => LoadIdentityCoreAsync(announce: true);
+
+    private async Task LoadIdentityCoreAsync(bool announce)
     {
         var distro = WslDistroName.Trim();
         var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        IsIdentityBusy = true;
         try
         {
             SshPublicKey = await _identity.ReadPublicKeyAsync(distro, profile, CancellationToken.None) ?? string.Empty;
             HasSshPublicKey = SshPublicKey.Length > 0;
-            SshStatus = HasSshPublicKey ? null : "No ssh key yet for this profile. Choose Generate key.";
             GpgPublicKey = await _identity.ReadGpgPublicKeyAsync(distro, profile, CancellationToken.None) ?? string.Empty;
             HasGpgPublicKey = GpgPublicKey.Length > 0;
-            GpgStatus = HasGpgPublicKey ? null : "No signing key yet for this profile. Choose Generate key.";
             var status = await _identity.GetGitHubAuthStatusAsync(distro, profile, CancellationToken.None);
-            GitHubStatus = status.IsAuthenticated ? $"Signed in as {status.Account}." : "Not signed in.";
+            GitHubAccountText = status.IsAuthenticated ? $"Signed in as {status.Account}." : "Not signed in.";
+
+            if (announce)
+            {
+                _snackbars.Show(HasIdentityKeys
+                    ? $"Retrieved the keys for the \"{profile.Name}\" profile."
+                    : $"The \"{profile.Name}\" profile has no keys yet.", HasIdentityKeys ? SnackbarKind.Success : SnackbarKind.Info);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Reading the identity for {Profile} failed.", profile.Name);
-            SshStatus = $"Could not read the identity: {ex.Message}";
+            _snackbars.Show($"Could not read the identity: {ex.Message}", SnackbarKind.Error);
         }
+        finally
+        {
+            IsIdentityBusy = false;
+        }
+    }
+
+    private void ClearIdentity()
+    {
+        SshPublicKey = string.Empty;
+        HasSshPublicKey = false;
+        GpgPublicKey = string.Empty;
+        HasGpgPublicKey = false;
+        GitHubAccountText = "Not signed in.";
+    }
+
+    /// <summary>The distro and profile a credential command acts on, or nothing if the name is missing.</summary>
+    private (string? Distro, IdentityProfile Profile) CurrentIdentityTarget()
+    {
+        var distro = WslDistroName.Trim();
+        if (string.IsNullOrWhiteSpace(distro))
+        {
+            _snackbars.Show("Set the WSL distro name first.", SnackbarKind.Error);
+            return (null, _settings.ResolveActiveProfile());
+        }
+
+        return (distro, SelectedProfile ?? _settings.ResolveActiveProfile());
     }
 
     [RelayCommand]
     private async Task GenerateSshKeyAsync()
     {
-        var distro = WslDistroName.Trim();
-        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
         try
         {
             await _identity.EnsureSshKeyAsync(distro, profile, CancellationToken.None);
-            await LoadIdentityAsync();
+            await LoadIdentityCoreAsync(announce: false);
+            _snackbars.Show($"Created an ssh key for the \"{profile.Name}\" profile.", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Generating the ssh key failed.");
-            SshStatus = $"Could not generate the ssh key: {ex.Message}";
+            _snackbars.Show($"Could not generate the ssh key: {ex.Message}", SnackbarKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RegenerateSshKeyAsync()
+    {
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
+        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
+            "Regenerate the ssh key?",
+            $"The \"{profile.Name}\" profile's current ssh keypair is deleted and a new one is created.",
+            "Regenerate",
+            "A public key you already added to GitHub keeps working there until you remove it by hand, but it no longer matches the private key on this machine."));
+        if (!confirmed) return;
+
+        try
+        {
+            await _identity.RegenerateSshKeyAsync(distro, profile, CancellationToken.None);
+            await LoadIdentityCoreAsync(announce: false);
+            _snackbars.Show($"Replaced the ssh key for the \"{profile.Name}\" profile.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Regenerating the ssh key failed.");
+            _snackbars.Show($"Could not regenerate the ssh key: {ex.Message}", SnackbarKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    private async Task DeleteSshKeyAsync()
+    {
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
+        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
+            "Delete the ssh key?",
+            $"Both halves of the \"{profile.Name}\" profile's ssh keypair are removed from its home directory.",
+            "Delete",
+            "The private key is gone for good, and any service still trusting the public key keeps trusting it until you remove it there."));
+        if (!confirmed) return;
+
+        try
+        {
+            await _identity.DeleteSshKeyAsync(distro, profile, CancellationToken.None);
+            await LoadIdentityCoreAsync(announce: false);
+            _snackbars.Show($"Deleted the ssh key for the \"{profile.Name}\" profile.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Deleting the ssh key failed.");
+            _snackbars.Show($"Could not delete the ssh key: {ex.Message}", SnackbarKind.Error);
         }
     }
 
     [RelayCommand]
     private async Task GenerateGpgKeyAsync()
     {
-        var distro = WslDistroName.Trim();
-        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
         try
         {
             await _identity.EnsureGpgKeyAsync(distro, profile, CancellationToken.None);
-            await LoadIdentityAsync();
+            await LoadIdentityCoreAsync(announce: false);
+            _snackbars.Show($"Created a signing key for the \"{profile.Name}\" profile.", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Generating the signing key failed.");
-            GpgStatus = $"Could not generate the signing key: {ex.Message}";
+            _snackbars.Show($"Could not generate the signing key: {ex.Message}", SnackbarKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RegenerateGpgKeyAsync()
+    {
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
+        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
+            "Regenerate the signing key?",
+            $"The \"{profile.Name}\" profile's current signing key is deleted from its keyring and a new one is created.",
+            "Regenerate",
+            "Commits already signed with the old key keep their signature but no longer verify against this profile's new key."));
+        if (!confirmed) return;
+
+        try
+        {
+            await _identity.RegenerateGpgKeyAsync(distro, profile, CancellationToken.None);
+            await LoadIdentityCoreAsync(announce: false);
+            _snackbars.Show($"Replaced the signing key for the \"{profile.Name}\" profile.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Regenerating the signing key failed.");
+            _snackbars.Show($"Could not regenerate the signing key: {ex.Message}", SnackbarKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    private async Task DeleteGpgKeyAsync()
+    {
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
+        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
+            "Delete the signing key?",
+            $"The \"{profile.Name}\" profile's signing key is removed from its keyring, secret half included.",
+            "Delete",
+            "Without the secret half nothing can be signed as this profile again, and the key cannot be recovered."));
+        if (!confirmed) return;
+
+        try
+        {
+            await _identity.DeleteGpgKeyAsync(distro, profile, CancellationToken.None);
+            await LoadIdentityCoreAsync(announce: false);
+            _snackbars.Show($"Deleted the signing key for the \"{profile.Name}\" profile.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Deleting the signing key failed.");
+            _snackbars.Show($"Could not delete the signing key: {ex.Message}", SnackbarKind.Error);
         }
     }
 
@@ -723,14 +1005,20 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private async Task CopySshKeyAsync()
     {
         if (!HasSshPublicKey) return;
-        if (await CopyToClipboardAsync(SshPublicKey)) SshStatus = "Public key copied to the clipboard.";
+        if (await CopyToClipboardAsync(SshPublicKey))
+        {
+            _snackbars.Show("Public key copied to the clipboard.", SnackbarKind.Success);
+        }
     }
 
     [RelayCommand]
     private async Task CopyGpgKeyAsync()
     {
         if (!HasGpgPublicKey) return;
-        if (await CopyToClipboardAsync(GpgPublicKey)) GpgStatus = "Public key copied to the clipboard.";
+        if (await CopyToClipboardAsync(GpgPublicKey))
+        {
+            _snackbars.Show("Public key copied to the clipboard.", SnackbarKind.Success);
+        }
     }
 
     private static async Task<bool> CopyToClipboardAsync(string text)
@@ -746,24 +1034,25 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     {
         if (string.IsNullOrWhiteSpace(GitHubToken))
         {
-            GitHubStatus = "Paste a token first.";
+            _snackbars.Show("Paste a token first.", SnackbarKind.Warning);
             return;
         }
 
-        var distro = WslDistroName.Trim();
-        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
         IsGitHubBusy = true;
         try
         {
             await _identity.SetGitHubTokenAsync(distro, profile, GitHubToken, CancellationToken.None);
             GitHubToken = string.Empty;
             var status = await _identity.GetGitHubAuthStatusAsync(distro, profile, CancellationToken.None);
-            GitHubStatus = status.IsAuthenticated ? $"Signed in as {status.Account}." : "The token was stored but gh did not report a signed-in account.";
+            GitHubAccountText = status.IsAuthenticated ? $"Signed in as {status.Account}." : "The token was stored but gh did not report a signed-in account.";
+            _snackbars.Show($"Stored the token for the \"{profile.Name}\" profile. {GitHubAccountText}", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Storing the GitHub token failed.");
-            GitHubStatus = $"Could not store the token: {ex.Message}";
+            _snackbars.Show($"Could not store the token: {ex.Message}", SnackbarKind.Error);
         }
         finally
         {
@@ -774,18 +1063,19 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     [RelayCommand]
     private async Task SignOutGitHubAsync()
     {
-        var distro = WslDistroName.Trim();
-        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
         IsGitHubBusy = true;
         try
         {
             await _identity.ClearGitHubTokenAsync(distro, profile, CancellationToken.None);
-            GitHubStatus = "Signed out.";
+            GitHubAccountText = "Not signed in.";
+            _snackbars.Show($"Signed out of GitHub for the \"{profile.Name}\" profile.", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Signing out of GitHub failed.");
-            GitHubStatus = $"Could not sign out: {ex.Message}";
+            _snackbars.Show($"Could not sign out: {ex.Message}", SnackbarKind.Error);
         }
         finally
         {
@@ -801,34 +1091,27 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     private async Task SyncConfigAsync(bool push)
     {
-        var distro = WslDistroName.Trim();
-        var profile = SelectedProfile ?? _settings.ResolveActiveProfile();
+        var (distro, profile) = CurrentIdentityTarget();
+        if (distro is null) return;
         var entries = SplitLines(SyncEntries);
         IsSyncing = true;
-        SyncStatus = null;
         try
         {
             var result = push
                 ? await _sync.PushAsync(distro, profile, entries, CancellationToken.None)
                 : await _sync.PullAsync(distro, profile, entries, CancellationToken.None);
             var skipped = result.Skipped.Length > 0 ? $" Skipped: {string.Join(", ", result.Skipped)}." : string.Empty;
-            SyncStatus = $"{(push ? "Pushed" : "Pulled")} {result.FilesCopied} file(s) {(push ? "to" : "from")} {profile.Name}.{skipped}";
+            _snackbars.Show($"{(push ? "Pushed" : "Pulled")} {result.FilesCopied} file(s) {(push ? "to" : "from")} {profile.Name}.{skipped}", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Syncing the Qwen configuration failed.");
-            SyncStatus = $"Sync failed: {ex.Message}";
+            _snackbars.Show($"Sync failed: {ex.Message}", SnackbarKind.Error);
         }
         finally
         {
             IsSyncing = false;
         }
-    }
-
-    private async Task<string?> ReadLatestQwenVersionAsync(string distro, IdentityProfile profile)
-    {
-        var result = await _wsl.RunScriptAsync(distro, profile.LinuxUser, "npm view @qwen-code/qwen-code version 2>/dev/null", CancellationToken.None);
-        return result.Succeeded ? WslDistro.ParseVersion(result.Output) : null;
     }
 
     private void LoadProfiles()
@@ -858,6 +1141,14 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         ProfileLinuxUser = value.LinuxUser;
         ProfileWorkspace = value.WorkspaceDirectory;
         QwenExecutable = value.ResolvedQwenExecutable;
+
+        // The keys belong to the profile, so switching identities has to re-read them. The first switch
+        // happens while the page is still loading, before the distro is known, and the refresh started
+        // there covers it.
+        if (HasCheckedDistro && IsDistroProvisioned)
+        {
+            _ = LoadIdentityCoreAsync(announce: false);
+        }
     }
 
     private void ScheduleSaveMessageFadeOut()
@@ -892,14 +1183,13 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         }
         catch (Exception ex)
         {
-            PublisherTrustMessage = $"Could not read the certificate stores: {ex.Message}";
+            _snackbars.Show($"Could not read the certificate stores: {ex.Message}", SnackbarKind.Error);
         }
     }
 
     [RelayCommand]
     private async Task TrustPublisherAsync()
     {
-        PublisherTrustMessage = null;
         IsTrustingPublisher = true;
 
         try
@@ -908,11 +1198,12 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             await Task.Run(_certTrust.TrustPublisher);
 
             IsPublisherTrusted = true;
-            PublisherTrustMessage = "Bitbound is now trusted for this user account. Already-downloaded copies of QwenTray show Bitbound as the verified publisher.";
+            _snackbars.Show("Bitbound is now trusted for this user account. Already-downloaded copies of QwenTray show Bitbound as the verified publisher.", SnackbarKind.Success);
         }
         catch (Exception ex)
         {
-            PublisherTrustMessage = $"Could not trust the certificate: {ex.Message}";
+            _logger.LogError(ex, "Trusting the publisher certificate failed.");
+            _snackbars.Show($"Could not trust the certificate: {ex.Message}", SnackbarKind.Error);
         }
         finally
         {
@@ -921,16 +1212,38 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     }
 
     [RelayCommand]
-    private void OpenLogFile()
+    private async Task OpenLogFileAsync()
     {
-        var path = _supervisor.LogPath;
-        if (string.IsNullOrWhiteSpace(path) || !_fileSystem.FileExists(path))
+        var path = await _supervisor.ResolveLogPathAsync(CancellationToken.None);
+        if (string.IsNullOrWhiteSpace(path))
         {
-            SaveWarning = "No daemon log is known yet. The path is captured once the daemon starts.";
+            _snackbars.Show("No daemon log is known yet. Start the daemon and try again.", SnackbarKind.Warning);
             return;
         }
 
-        _processes.Start(path, string.Empty, useShellExec: true);
+        try
+        {
+            _processes.Start(path, string.Empty, useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Opening the daemon log at {LogPath} failed.", path);
+            _snackbars.Show($"Could not open the daemon log: {ex.Message}", SnackbarKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenTrayFolder()
+    {
+        try
+        {
+            _processes.Start("explorer.exe", $"\"{SettingsStore.DirectoryPath}\"", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Opening the QwenTray folder failed.");
+            _snackbars.Show($"Could not open the QwenTray folder: {ex.Message}", SnackbarKind.Error);
+        }
     }
 
     private void OnLocalControlPairingUrlChanged(object? sender, EventArgs e)

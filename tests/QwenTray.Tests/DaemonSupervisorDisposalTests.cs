@@ -10,7 +10,15 @@ internal sealed class FakeWslDistro : IWslDistro
 {
     public List<string> Scripts { get; } = [];
 
+    public List<string> RootScripts { get; } = [];
+
+    public List<string> UnregisteredDistros { get; } = [];
+
+    public List<string> TerminatedDistros { get; } = [];
+
     public string ScriptOutput { get; set; } = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@qwentray";
+
+    public int UnregisterExitCode { get; set; }
 
     public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(true);
 
@@ -27,13 +35,25 @@ internal sealed class FakeWslDistro : IWslDistro
     }
 
     public Task<WslCommandResult> RunRootScriptAsync(string distro, string script, CancellationToken cancellationToken)
-        => Task.FromResult(new WslCommandResult(0, string.Empty));
+    {
+        RootScripts.Add(script);
+        return Task.FromResult(new WslCommandResult(0, string.Empty));
+    }
 
     public Task<WslCommandResult> InstallDistroAsync(string distro, CancellationToken cancellationToken)
         => Task.FromResult(new WslCommandResult(0, string.Empty));
 
     public Task<WslCommandResult> TerminateAsync(string distro, CancellationToken cancellationToken)
-        => Task.FromResult(new WslCommandResult(0, string.Empty));
+    {
+        TerminatedDistros.Add(distro);
+        return Task.FromResult(new WslCommandResult(0, string.Empty));
+    }
+
+    public Task<WslCommandResult> UnregisterAsync(string distro, CancellationToken cancellationToken)
+    {
+        UnregisteredDistros.Add(distro);
+        return Task.FromResult(new WslCommandResult(UnregisterExitCode, UnregisterExitCode == 0 ? string.Empty : "The distribution does not exist."));
+    }
 
     public IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile)
         => throw new NotSupportedException("These tests never start a daemon.");

@@ -94,6 +94,30 @@ public sealed class Settings
     [System.Text.Json.Serialization.JsonIgnore]
     public Uri WebUri => new($"{Scheme}://{ClientHost}:{Port}");
 
+    /// <summary>
+    /// The Web Shell address with the bearer token in the URL fragment, which is how the page reads
+    /// one. A fragment is never sent to the server, and the daemon builds its own pairing links the
+    /// same way. Falls back to the bare address when no token is configured.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Uri WebShellUri
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(Token))
+            {
+                return WebUri;
+            }
+
+            var builder = new UriBuilder(WebUri)
+            {
+                // Escaped the way the daemon escapes it, because the page decodes the fragment.
+                Fragment = "token=" + Uri.EscapeDataString(Token.Trim()),
+            };
+            return builder.Uri;
+        }
+    }
+
     /// <summary>The profile selected by <see cref="ActiveProfileId"/>, the first one, or the default.</summary>
     public IdentityProfile ResolveActiveProfile()
     {

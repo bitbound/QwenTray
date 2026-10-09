@@ -1,7 +1,7 @@
 using Avalonia.Threading;
-using Bitbound.SystemAbstractions.FileSystem;
 using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.Logging;
+using QwenTray.Services;
 using QwenTray.Views;
 
 namespace QwenTray.ViewModels;
@@ -10,8 +10,8 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
 {
     private readonly Settings _settings;
     private readonly DaemonSupervisor _supervisor;
-    private readonly IFileSystem _fileSystem;
     private readonly IProcessManager _processes;
+    private readonly ISnackbarService _snackbars;
     private readonly ILogger<DaemonViewModel> _logger;
 
     [ObservableProperty]
@@ -46,6 +46,8 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
 
     private bool _daemonCommandBusy;
 
+    private string? _resolvedLogPath;
+
     [ObservableProperty]
     private string _endpoint = string.Empty;
 
@@ -64,14 +66,14 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     public DaemonViewModel(
         Settings settings,
         DaemonSupervisor supervisor,
-        IFileSystem fileSystem,
         IProcessManager processes,
+        ISnackbarService snackbars,
         ILogger<DaemonViewModel> logger)
     {
         _settings = settings;
         _supervisor = supervisor;
-        _fileSystem = fileSystem;
         _processes = processes;
+        _snackbars = snackbars;
         _logger = logger;
 
         _supervisor.StateChanged += (_, state) => Dispatcher.UIThread.Post(() => ApplyState(state));
@@ -82,7 +84,26 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
         RefreshAddresses();
         ApplyState(_supervisor.State);
 
+        // A daemon the tray adopted never printed its banner here, so ask for the log path once.
+        _ = ResolveLogPathAsync();
+
         return Task.CompletedTask;
+    }
+
+    private async Task ResolveLogPathAsync()
+    {
+        try
+        {
+            _resolvedLogPath = await _supervisor.ResolveLogPathAsync(CancellationToken.None);
+            if (_supervisor.LogPath is null)
+            {
+                LogPath = _resolvedLogPath ?? "Not reported yet.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not resolve the daemon log path.");
+        }
     }
 
     [RelayCommand]
@@ -109,20 +130,67 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     [RelayCommand]
     private void OpenWebShell()
     {
-        _processes.LaunchUri(_settings.WebUri);
+        _processes.LaunchUri(_settings.WebShellUri);
     }
 
     [RelayCommand]
-    private void OpenLog()
+    private async Task OpenLogAsync()
     {
-        var path = _supervisor.LogPath;
-        if (string.IsNullOrWhiteSpace(path) || !_fileSystem.FileExists(path))
+        var path = await _supervisor.ResolveLogPathAsync(CancellationToken.None);
+        if (string.IsNullOrWhiteSpace(path))
         {
-            _logger.LogWarning("No daemon log is known yet.");
+            _logger.LogInformation("No daemon log is known yet.");
+            _snackbars.Show("No daemon log is known yet. Start the daemon and try again.", SnackbarKind.Warning);
             return;
         }
 
-        _processes.Start(path, string.Empty, useShellExec: true);
+        try
+        {
+            _processes.Start(path, string.Empty, useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Opening the daemon log at {LogPath} failed.", path);
+            _snackbars.Show($"Could not open the daemon log: {ex.Message}", SnackbarKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenTrayFolder()
+    {
+        try
+        {
+            // The tray's own folder on the Windows host: qwentray.log and settings.json.
+            _processes.Start("explorer.exe", $"\"{SettingsStore.DirectoryPath}\"", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Opening the QwenTray folder failed.");
+            _snackbars.Show($"Could not open the QwenTray folder: {ex.Message}", SnackbarKind.Error);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenInWindowsTerminal()
+    {
+        var distro = _settings.WslDistroName;
+        var profile = _settings.ResolveActiveProfile();
+        if (!SettingsViewModel.IsSafeDistroName(distro) || !IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
+        {
+            _snackbars.Show("Fix the distro name or the profile's Linux user before opening a terminal.", SnackbarKind.Warning);
+            return;
+        }
+
+        try
+        {
+            _processes.Start("wt.exe", $"wsl.exe -d {distro} -u {profile.LinuxUser}", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            // Windows Terminal is not installed everywhere, so fall back to a plain console.
+            _logger.LogDebug(ex, "Windows Terminal could not be started; falling back to wsl.exe.");
+            _processes.Start("wsl.exe", $"-d {distro} -u {profile.LinuxUser}", useShellExec: true);
+        }
     }
 
     private async Task RunAsync(Func<Task> action)
@@ -189,6 +257,6 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
         };
 
         ProcessId = _supervisor.DaemonProcessId?.ToString() ?? "None";
-        LogPath = _supervisor.LogPath ?? "Not reported yet.";
+        LogPath = _supervisor.LogPath ?? _resolvedLogPath ?? "Not reported yet.";
     }
 }

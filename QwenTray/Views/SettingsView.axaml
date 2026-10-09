@@ -64,6 +64,27 @@
     <Style Selector="Border.status.neutral PathIcon">
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
     </Style>
+
+    <!-- Set apart from the actions above it, because these ones cannot be undone. -->
+    <Style Selector="Border.DangerZone">
+      <Setter Property="Background" Value="{DynamicResource SnackbarErrorBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ErrorColor}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="14,12" />
+    </Style>
+
+    <Style Selector="TextBlock.dangerHeading">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    </Style>
+
+    <Style Selector="TextBlock.progress">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
   </UserControl.Styles>
 
   <Grid RowDefinitions="*,Auto">
@@ -111,18 +132,41 @@
             </Grid>
 
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="{Binding SetupDistroLabel}"
+                      Classes="Primary VariantFilled"
+                      Command="{Binding SetupDistroCommand}"
+                      IsEnabled="{Binding CanSetupDistro}" />
               <Button Content="Check status"
                       Classes="Primary VariantOutlined"
                       Command="{Binding RefreshDistroCommand}"
                       IsEnabled="{Binding !IsDistroBusy}" />
-              <Button Content="Set up distro"
-                      Classes="Primary VariantFilled"
-                      Command="{Binding SetupDistroCommand}"
-                      IsEnabled="{Binding !IsDistroBusy}" />
-              <Button Content="Open in Windows Terminal"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding OpenInWindowsTerminalCommand}" />
             </StackPanel>
+
+            <TextBlock Classes="caption"
+                       Text="{Binding SetupDistroHelp}"
+                       TextWrapping="Wrap" />
+            <TextBlock Classes="progress"
+                       Text="{Binding DistroProgress}"
+                       IsVisible="{Binding DistroProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <Border Classes="DangerZone">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="dangerHeading" Text="Delete and rebuild" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Rebuild discards this distro and builds an empty one under the same name. Delete unregisters it and throws away its filesystem. Both take every profile's keys, GitHub sign-ins, workspaces, and Qwen configuration with them, and neither can be undone." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="Rebuild"
+                          Classes="Error VariantOutlined"
+                          Command="{Binding RebuildDistroCommand}"
+                          IsEnabled="{Binding CanRebuildDistro}" />
+                  <Button Content="Delete"
+                          Classes="Error VariantFilled"
+                          Command="{Binding DeleteDistroCommand}"
+                          IsEnabled="{Binding CanDeleteDistro}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
           </StackPanel>
         </Border>
 
@@ -170,12 +214,13 @@
 
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
               <Button Content="Add profile" Classes="Primary VariantOutlined" Command="{Binding AddProfileCommand}" />
+              <Button Content="Duplicate" Classes="Primary VariantOutlined" Command="{Binding DuplicateProfileCommand}" />
               <Button Content="Remove profile" Classes="Primary VariantOutlined" Command="{Binding RemoveProfileCommand}" />
             </StackPanel>
 
             <TextBlock Classes="caption"
                        TextWrapping="Wrap"
-                       Text="Press Set up distro to create a new profile's Linux user. Saving with a different active profile restarts the daemon as that identity." />
+                       Text="Duplicate copies the name, user, and directory fields above into a new profile; leave them empty to get a copy with its own Linux user. Duplicating never copies keys or the GitHub sign-in, because that would be the same identity twice. Press Set up distro to create a new profile's Linux user. Saving with a different active profile restarts the daemon as that identity." />
           </StackPanel>
         </Border>
 
@@ -221,12 +266,9 @@
                       IsEnabled="{Binding !IsQwenBusy}" />
             </StackPanel>
 
-            <TextBlock Text="{Binding QwenStatus}"
-                       Classes="caption"
-                       Classes.Error="{Binding QwenStatusIsError}"
-                       TextWrapping="Wrap"
-                       Margin="0,4,0,0"
-                       IsVisible="{Binding QwenStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            <TextBlock Classes="progress"
+                       Text="{Binding QwenProgress}"
+                       IsVisible="{Binding QwenProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Border>
 
@@ -249,15 +291,28 @@
                         IsEnabled="{Binding HasSshPublicKey}" />
                 <Button Content="Generate key"
                         Classes="Primary VariantOutlined"
-                        Command="{Binding GenerateSshKeyCommand}" />
+                        Command="{Binding GenerateSshKeyCommand}"
+                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsVisible="{Binding !HasSshPublicKey}" />
+                <Button Content="Regenerate"
+                        Classes="Error VariantOutlined"
+                        Command="{Binding RegenerateSshKeyCommand}"
+                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsVisible="{Binding HasSshPublicKey}" />
+                <Button Content="Delete"
+                        Classes="Error VariantText"
+                        Command="{Binding DeleteSshKeyCommand}"
+                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsVisible="{Binding HasSshPublicKey}" />
                 <Button Content="Refresh"
-                        Classes="Primary VariantOutlined"
-                        Command="{Binding LoadIdentityCommand}" />
+                        Classes="Default VariantText"
+                        Command="{Binding LoadIdentityCommand}"
+                        IsEnabled="{Binding !IsIdentityBusy}" />
               </StackPanel>
-              <TextBlock Text="{Binding SshStatus}"
-                         Classes="caption"
+              <TextBlock Classes="caption"
                          TextWrapping="Wrap"
-                         IsVisible="{Binding SshStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                         Text="No ssh key for this profile yet. Generate key creates one in its home directory."
+                         IsVisible="{Binding !HasSshPublicKey}" />
             </StackPanel>
 
             <TextBlock Classes="field" Text="GPG public key" Margin="0,10,0,0" />
@@ -275,15 +330,27 @@
                         IsEnabled="{Binding HasGpgPublicKey}" />
                 <Button Content="Generate key"
                         Classes="Primary VariantOutlined"
-                        Command="{Binding GenerateGpgKeyCommand}" />
+                        Command="{Binding GenerateGpgKeyCommand}"
+                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsVisible="{Binding !HasGpgPublicKey}" />
+                <Button Content="Regenerate"
+                        Classes="Error VariantOutlined"
+                        Command="{Binding RegenerateGpgKeyCommand}"
+                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsVisible="{Binding HasGpgPublicKey}" />
+                <Button Content="Delete"
+                        Classes="Error VariantText"
+                        Command="{Binding DeleteGpgKeyCommand}"
+                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsVisible="{Binding HasGpgPublicKey}" />
               </StackPanel>
               <TextBlock Classes="caption"
                          TextWrapping="Wrap"
                          Text="An ed25519 signing key with no passphrase, held in this profile's own keyring, so it can sign commits unattended." />
-              <TextBlock Text="{Binding GpgStatus}"
-                         Classes="caption"
+              <TextBlock Classes="caption"
                          TextWrapping="Wrap"
-                         IsVisible="{Binding GpgStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                         Text="No signing key for this profile yet. Generate key creates one in its keyring."
+                         IsVisible="{Binding !HasGpgPublicKey}" />
             </StackPanel>
 
             <TextBlock Classes="field" Text="GitHub token" Margin="0,10,0,0" />
@@ -314,7 +381,7 @@
                         Command="{Binding SignOutGitHubCommand}"
                         IsEnabled="{Binding !IsGitHubBusy}" />
               </StackPanel>
-              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GitHubStatus}" />
+              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GitHubAccountText}" />
             </StackPanel>
           </StackPanel>
         </Border>
@@ -344,11 +411,6 @@
                       Command="{Binding PullConfigCommand}"
                       IsEnabled="{Binding !IsSyncing}" />
             </StackPanel>
-
-            <TextBlock Text="{Binding SyncStatus}"
-                       Classes="caption"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding SyncStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Border>
 
@@ -377,7 +439,7 @@
                 </Grid>
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="Leave empty for a loopback-only daemon. A non-loopback bind needs a token." />
+                           Text="Leave empty for a loopback-only daemon. A non-loopback bind needs a token. With one set, Open Web Shell passes it to the page in the address fragment." />
               </StackPanel>
 
               <CheckBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0"
@@ -512,11 +574,6 @@
                          VerticalAlignment="Center"
                          IsVisible="{Binding IsPublisherTrusted}" />
             </StackPanel>
-
-            <TextBlock Text="{Binding PublisherTrustMessage}"
-                       Classes="caption"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding PublisherTrustMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Border>
 
@@ -541,6 +598,10 @@
               <Button Content="Open daemon log"
                       Classes="Primary VariantOutlined"
                       Command="{Binding OpenLogFileCommand}" />
+              <Button Content="Open QwenTray folder"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding OpenTrayFolderCommand}"
+                      ToolTip.Tip="The Windows folder holding this tray's own log and settings.json." />
             </StackPanel>
 
             <TextBlock Text="{Binding LogFilePath}" Classes="caption" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />

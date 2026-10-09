@@ -77,11 +77,58 @@ public sealed class WslDistroProvisioner(
     public async Task<WslCommandResult> InstallOrUpdateQwenAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
         => await wsl.RunScriptAsync(distro, profile.LinuxUser, QwenInstallCommand, cancellationToken);
 
+    /// <summary>
+    /// Removes the distro and everything inside it: every profile's ssh and signing keys, GitHub
+    /// sign-ins, workspaces, and Qwen configuration. There is no undo.
+    /// </summary>
+    public async Task DeleteAsync(string distro, CancellationToken cancellationToken)
+    {
+        // A running distro refuses to unregister, so it is stopped first even when the caller already
+        // stopped the daemon.
+        await wsl.TerminateAsync(distro, cancellationToken);
+
+        var result = await wsl.UnregisterAsync(distro, cancellationToken);
+        if (!result.Succeeded) throw new InvalidOperationException($"Could not delete the {distro} distro. {result.Output}");
+
+        logger.LogInformation("Unregistered distro {Distro}.", distro);
+    }
+
+    /// <summary>
+    /// Deletes the distro and provisions a new one under the same name, so the existing filesystem and
+    /// every identity inside it are replaced rather than repaired.
+    /// </summary>
+    public async Task RebuildAsync(string distro, IReadOnlyList<IdentityProfile> profiles, CancellationToken cancellationToken)
+    {
+        if (await wsl.DistroExistsAsync(distro, cancellationToken))
+        {
+            await DeleteAsync(distro, cancellationToken);
+        }
+
+        await ProvisionAsync(distro, profiles, cancellationToken);
+    }
+
     public async Task<string?> ReadQwenVersionAsync(string distro, IdentityProfile profile, string qwenExecutable, CancellationToken cancellationToken)
     {
         var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, $"{qwenExecutable} --version", cancellationToken);
         return result.Succeeded ? WslDistro.ParseVersion(result.Output) : null;
     }
+
+    /// <summary>
+    /// The newest published Qwen version, or nothing if the registry could not be reached.
+    /// </summary>
+    public async Task<string?> ReadLatestQwenVersionAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildLatestQwenVersionScript(), cancellationToken);
+        return result.Succeeded ? WslDistro.ParseVersion(result.Output) : null;
+    }
+
+    /// <summary>
+    /// Asks the npm registry for the latest version. Not <c>npm view</c>: the distro is sealed and the
+    /// standalone Qwen install carries its own node runtime, so npm is not in there to be found.
+    /// The extraction stays inside the distro so the manifest never crosses to Windows.
+    /// </summary>
+    internal static string BuildLatestQwenVersionScript() =>
+        "curl -fsSL --max-time 20 https://registry.npmjs.org/@qwen-code/qwen-code/latest | grep -oE '\"version\":\"[0-9][^\"]*\"' | head -1 | cut -d'\"' -f4";
 
     public async Task<string?> ResolveQwenPathAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {

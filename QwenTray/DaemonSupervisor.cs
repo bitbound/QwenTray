@@ -45,6 +45,44 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     public string? LocalControlPairingUrl => _localControlPairingUrl;
     public event EventHandler? LocalControlPairingUrlChanged;
 
+    /// <summary>
+    /// Where the daemon writes its log, as a path Windows can open. The startup banner is the
+    /// authoritative answer. A daemon that was already running when the tray started has no banner, so
+    /// its conventional location is asked of the distro instead.
+    /// </summary>
+    public async Task<string?> ResolveLogPathAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_logPath))
+        {
+            return _logPath;
+        }
+
+        var profile = _settings.ResolveActiveProfile();
+        if (!IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
+        {
+            return null;
+        }
+
+        try
+        {
+            var result = await _wsl.RunScriptAsync(_settings.WslDistroName, profile.LinuxUser, ConventionalLogPathScript, cancellationToken);
+            if (!result.Succeeded)
+            {
+                return null;
+            }
+
+            return ToUncPath(_settings.WslDistroName, WslDistro.ParseAbsolutePath(result.Output) ?? string.Empty);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
+        {
+            _logger.LogDebug(exception, "Could not ask the distro for the conventional daemon log path.");
+            return null;
+        }
+    }
+
+    internal const string ConventionalLogPathScript =
+        "test -f ~/.qwen/debug/daemon/daemon.log && printf %s \"$HOME/.qwen/debug/daemon/daemon.log\"";
+
     public async Task RefreshLocalControlPairingAsync(CancellationToken cancellationToken = default)
     {
         if (!_settings.LocalControl || !IsLoopbackHost(_settings.Host) || !_settings.ServeWeb || State is not (DaemonState.Starting or DaemonState.Running))
@@ -296,6 +334,19 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             "-d", distro,
             "-u", profile.LinuxUser,
             "-e",
+        };
+        args.AddRange(BuildServeArguments(settings, profile));
+        return args;
+    }
+
+    /// <summary>
+    /// The qwen launcher and everything passed to it, with no wsl.exe arguments in front. This is the
+    /// list the distro runs, so anything executed inside it is quoted from here.
+    /// </summary>
+    internal static List<string> BuildServeArguments(Settings settings, IdentityProfile profile)
+    {
+        var args = new List<string>
+        {
             profile.ResolvedQwenExecutable,
             "serve",
             "--hostname", settings.Host,
@@ -410,12 +461,21 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     private void TryCaptureLogPath(string line)
     {
-        var match = LogPathRegex.Match(line);
-        if (!match.Success) return;
-        var path = ToUncPath(_settings.WslDistroName, match.Groups[1].Value.Trim());
-        if (path.Length == 0 || string.Equals(path, _logPath, StringComparison.Ordinal)) return;
+        if (!TryReadLogPath(line, _settings.WslDistroName, out var path)) return;
+        if (string.Equals(path, _logPath, StringComparison.Ordinal)) return;
         _logPath = path;
         _logger.LogInformation("Daemon reported its log file at {LogPath}.", path);
+    }
+
+    /// <summary>
+    /// Reads the log path out of the banner the daemon prints at startup. The banner is written to
+    /// stderr, so whoever spawns the daemon has to fold stderr into the stream being read here.
+    /// </summary>
+    internal static bool TryReadLogPath(string line, string distro, out string logPath)
+    {
+        var match = LogPathRegex.Match(line);
+        logPath = match.Success ? ToUncPath(distro, match.Groups[1].Value.Trim()) : string.Empty;
+        return logPath.Length > 0;
     }
 
     /// <summary>Turns <c>/home/qwen/.qwen/daemon.log</c> into the distro share Windows can open.</summary>

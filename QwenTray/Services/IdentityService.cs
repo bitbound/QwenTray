@@ -25,6 +25,22 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
         if (!result.Succeeded) throw new InvalidOperationException($"Could not create the ssh key for {profile.Name}. {result.Output}");
     }
 
+    /// <summary>
+    /// Removes both halves of the keypair. A public key already added to GitHub stays there until the
+    /// user removes it, so this only invalidates it.
+    /// </summary>
+    public async Task DeleteSshKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildDeleteSshKeyScript(), cancellationToken);
+        if (!result.Succeeded) throw new InvalidOperationException($"Could not delete the ssh key for {profile.Name}. {result.Output}");
+    }
+
+    public async Task RegenerateSshKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        await DeleteSshKeyAsync(distro, profile, cancellationToken);
+        await EnsureSshKeyAsync(distro, profile, cancellationToken);
+    }
+
     public async Task<string?> ReadPublicKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {
         var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, $"cat {SshKeyPath}.pub", cancellationToken);
@@ -37,6 +53,18 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     {
         var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildEnsureGpgKeyScript(profile), cancellationToken);
         if (!result.Succeeded) throw new InvalidOperationException($"Could not create the signing key for {profile.Name}. {result.Output}");
+    }
+
+    public async Task DeleteGpgKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildDeleteGpgKeyScript(profile), cancellationToken);
+        if (!result.Succeeded) throw new InvalidOperationException($"Could not delete the signing key for {profile.Name}. {result.Output}");
+    }
+
+    public async Task RegenerateGpgKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        await DeleteGpgKeyAsync(distro, profile, cancellationToken);
+        await EnsureGpgKeyAsync(distro, profile, cancellationToken);
     }
 
     public async Task<string?> ReadGpgPublicKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
@@ -69,6 +97,9 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     internal static string BuildEnsureSshKeyScript() =>
         $"test -f {SshKeyPath} || (mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -t ed25519 -N '' -C qwentray -f {SshKeyPath} >/dev/null && chmod 600 {SshKeyPath})";
 
+    internal static string BuildDeleteSshKeyScript() =>
+        $"rm -f {SshKeyPath} {SshKeyPath}.pub";
+
     // The signing key has no passphrase so the daemon can sign unattended. The uid is always quoted
     // because it holds angle brackets and a space.
     internal static string BuildEnsureGpgKeyScript(IdentityProfile profile)
@@ -78,6 +109,9 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     }
 
     internal static string BuildGpgExportScript(IdentityProfile profile) => $"gpg --armor --export \"{GpgUserId(profile)}\"";
+
+    internal static string BuildDeleteGpgKeyScript(IdentityProfile profile)
+        => $"gpg --batch --yes --delete-secret-and-public-key \"{GpgUserId(profile)}\"";
 
     /// <summary>Reads the token from stdin so it never appears on a command line or in a process list.</summary>
     internal static string BuildGitHubTokenScript()

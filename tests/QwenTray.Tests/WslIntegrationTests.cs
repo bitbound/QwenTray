@@ -64,6 +64,54 @@ public sealed class WslCommandTests
         Assert.Equal("1.2.3", WslDistro.ParseVersion("\r\n1.2.3\r\n"));
         Assert.Null(WslDistro.ParseVersion("\r\n\r\n"));
     }
+
+    [Fact]
+    public void UnregisterIsItsOwnCommandAndCarriesOnlyTheDistroName()
+    {
+        Assert.Equal("--unregister QwenTray", WslDistro.UnregisterInvocation("QwenTray").Arguments);
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.UnregisterInvocation("QwenTray").Encoding.CodePage);
+    }
+
+    [Fact]
+    public void SplittingTheServeArgumentsKeepsTheSpawnCommandLineIdentical()
+    {
+        var settings = new Settings { Port = 4170 };
+        var profile = Settings.CreateDefaultProfile();
+        var composed = DaemonSupervisor.BuildArguments(settings, "QwenTray", profile);
+        var expected = new List<string> { "-d", "QwenTray", "-u", "qwen", "-e" };
+        expected.AddRange(DaemonSupervisor.BuildServeArguments(settings, profile));
+        Assert.Equal(expected, composed);
+    }
+
+    [Fact]
+    public void TheDaemonRunsThroughBashWithStderrFoldedIntoStdout()
+    {
+        // The startup banner that names the log file is written to stderr, so the daemon's stderr has to
+        // land in the one stream the supervisor reads.
+        var command = WslDistro.BuildDaemonCommand("QwenTray", "qwen", DaemonSupervisor.BuildServeArguments(new Settings { Port = 4170 }, Settings.CreateDefaultProfile()));
+        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/bin/bash", "-lc"], command.Take(7));
+        var script = command[7];
+        Assert.StartsWith("exec '/home/qwen/.local/bin/qwen' 'serve' '--hostname' '127.0.0.1' '--port' '4170'", script, StringComparison.Ordinal);
+        Assert.EndsWith("' 2>&1", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void QuotingForTheShellKeepsEveryMetacharacterLiteral()
+    {
+        Assert.Equal("'abc'", WslDistro.QuotePosix("abc"));
+        Assert.Equal("'a; rm -rf /'", WslDistro.QuotePosix("a; rm -rf /"));
+        Assert.Equal("'$(echo pwned)'", WslDistro.QuotePosix("$(echo pwned)"));
+        // An embedded single quote closes the literal, emits one escaped quote, and reopens it.
+        Assert.Equal("'it'\\''s'", WslDistro.QuotePosix("it's"));
+        Assert.Equal("''", WslDistro.QuotePosix(string.Empty));
+    }
+
+    [Fact]
+    public void ATokenCarryingShellSyntaxStaysInsideItsOwnArgument()
+    {
+        var script = WslDistro.BuildDaemonScript(["--token", "a' ; touch /pwned ; echo '"]);
+        Assert.Equal("exec '--token' 'a'\\'' ; touch /pwned ; echo '\\''' 2>&1", script);
+    }
 }
 
 public sealed class WslConfigTests
@@ -288,5 +336,48 @@ public sealed class IdentityTests
         Assert.Equal("work_account", SettingsViewModel.SlugifyLinuxUser("Work Account"));
         Assert.Equal("user1profile", SettingsViewModel.SlugifyLinuxUser("1profile"));
         Assert.True(SettingsViewModel.IsValidLinuxUser(SettingsViewModel.SlugifyLinuxUser("Weird! Name?")));
+    }
+
+    [Fact]
+    public void DeletingTheSshKeyRemovesBothHalvesAndNothingElse()
+    {
+        var script = IdentityService.BuildDeleteSshKeyScript();
+        Assert.Equal("rm -f ~/.ssh/id_ed25519 ~/.ssh/id_ed25519.pub", script);
+        // known_hosts belongs to the profile too, so a key delete must not wipe it.
+        Assert.DoesNotContain("known_hosts", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("-r", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeletingTheSigningKeyTakesTheSecretHalfAndQuotesTheUid()
+    {
+        var script = IdentityService.BuildDeleteGpgKeyScript(new IdentityProfile { LinuxUser = "qwen" });
+        Assert.Equal("gpg --batch --yes --delete-secret-and-public-key \"QwenTray qwen <qwen@qwentray.local>\"", script);
+    }
+
+    [Fact]
+    public async Task RegeneratingTheSshKeyDeletesBeforeItCreates()
+    {
+        var wsl = new FakeWslDistro();
+        var service = new IdentityService(wsl, NullLogger<IdentityService>.Instance);
+        await service.RegenerateSshKeyAsync("QwenTray", new IdentityProfile { LinuxUser = "qwen" }, CancellationToken.None);
+
+        var delete = wsl.Scripts.FindIndex(script => script.StartsWith("rm -f", StringComparison.Ordinal));
+        var create = wsl.Scripts.FindIndex(script => script.Contains("ssh-keygen", StringComparison.Ordinal));
+        Assert.InRange(delete, 0, wsl.Scripts.Count - 1);
+        Assert.True(delete < create, "the old key has to be gone before a new one is written");
+    }
+
+    [Fact]
+    public async Task RegeneratingTheSigningKeyDeletesBeforeItCreates()
+    {
+        var wsl = new FakeWslDistro();
+        var service = new IdentityService(wsl, NullLogger<IdentityService>.Instance);
+        await service.RegenerateGpgKeyAsync("QwenTray", new IdentityProfile { LinuxUser = "qwen" }, CancellationToken.None);
+
+        var delete = wsl.Scripts.FindIndex(script => script.Contains("--delete-secret-and-public-key", StringComparison.Ordinal));
+        var create = wsl.Scripts.FindIndex(script => script.Contains("--quick-generate-key", StringComparison.Ordinal));
+        Assert.InRange(delete, 0, wsl.Scripts.Count - 1);
+        Assert.True(delete < create, "the old key has to be gone before a new one is written");
     }
 }

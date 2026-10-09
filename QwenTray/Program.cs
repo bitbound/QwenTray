@@ -91,6 +91,9 @@ internal static class Program
         services.AddSingleton<DaemonSupervisor>();
         services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();
 
+        services.AddSingleton<ISnackbarService, SnackbarService>();
+        services.AddSingleton<IConfirmDialogService, ConfirmDialogService>();
+
         services.AddSingleton<INavigationProvider, NavigationProvider>();
         services.AddSingleton<IMainWindowViewModel, MainWindowViewModel>();
         services.AddSingleton<DaemonViewModel>();

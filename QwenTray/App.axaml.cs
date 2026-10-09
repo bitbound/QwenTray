@@ -133,14 +133,15 @@ public partial class App : Application
     private void OnOpenWeb(object? sender, EventArgs e)
     {
         ResetMenuItem(sender);
+        // Logged without the fragment so the bearer token stays out of the tray log.
         _logger.LogInformation("Opening web shell at {WebUri}", _settings.WebUri);
-        _processes.LaunchUri(_settings.WebUri);
+        _processes.LaunchUri(_settings.WebShellUri);
     }
 
-    private void OnOpenLog(object? sender, EventArgs e)
+    private async void OnOpenLog(object? sender, EventArgs e)
     {
         ResetMenuItem(sender);
-        var path = _supervisor.LogPath;
+        var path = await _supervisor.ResolveLogPathAsync(CancellationToken.None);
         if (string.IsNullOrWhiteSpace(path))
         {
             _logger.LogWarning("No daemon log found to open.");
