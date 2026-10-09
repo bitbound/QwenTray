@@ -226,6 +226,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             return;
         }
 
+        // A Stopped supervisor owns no daemon. Adoption happens only in StartAsync, so a stray process
+        // answering the health port must not pull a stopped tray into Running here.
+        if (State == DaemonState.Stopped) return;
+
         var healthy = await IsHealthyAsync();
         if (healthy)
         {

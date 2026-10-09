@@ -27,6 +27,17 @@ public sealed class WslDistroProvisioner(
         return result.Succeeded && result.Output.Contains("ready", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Whether the distro exists and finished provisioning, the readiness the Settings page reports.
+    /// The existence check runs first so an unconfigured name never boots a root shell.
+    /// </summary>
+    public async Task<bool> IsConfiguredAsync(string distro, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(distro)) return false;
+        if (!await wsl.DistroExistsAsync(distro, cancellationToken)) return false;
+        return await IsProvisionedAsync(distro, cancellationToken);
+    }
+
     public async Task ProvisionAsync(string distro, IReadOnlyList<IdentityProfile> profiles, CancellationToken cancellationToken)
     {
         logger.LogInformation("Provisioning distro {Distro} with {ProfileCount} profile(s).", distro, profiles.Count);
