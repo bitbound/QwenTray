@@ -16,6 +16,26 @@ public sealed class WslCommandTests
     }
 
     [Fact]
+    public void OutputEncodingFollowsTheInvocation()
+    {
+        // wsl.exe writes its own output as UTF-16LE, but passes a child command's stdout through as UTF-8.
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ListDistrosInvocation().Encoding.CodePage);
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.InstallDistroInvocation("D").Encoding.CodePage);
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.TerminateInvocation("D").Encoding.CodePage);
+        Assert.Equal(Encoding.UTF8.CodePage, WslDistro.ScriptInvocation("D", "u", "s").Encoding.CodePage);
+        Assert.Equal(Encoding.UTF8.CodePage, WslDistro.DaemonInvocation(new Settings(), "D", Settings.CreateDefaultProfile()).Encoding.CodePage);
+    }
+
+    [Fact]
+    public void CommandOutputDecodedAsUtf16WouldLoseTheText()
+    {
+        // The exact bytes measured from `wsl -d QwenTray -e /bin/bash -lc "echo ready"`.
+        var bytes = "ready\n"u8.ToArray();
+        Assert.DoesNotContain("ready", WslDistro.WslOutputEncoding.GetString(bytes), StringComparison.Ordinal);
+        Assert.Equal("ready\n", WslDistro.CommandOutputEncoding.GetString(bytes));
+    }
+
+    [Fact]
     public void DistroNamesSurviveNulAndBomAndSplitOnEither()
     {
         Assert.Equal(["Ubuntu-26.04", "QwenTray", "docker-desktop"], WslDistro.ParseDistroNames("Ubuntu-26.04\r\n\0QwenTray\0\r\n\uFEFFdocker-desktop\r\n"));

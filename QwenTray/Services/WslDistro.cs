@@ -26,6 +26,13 @@ public interface IWslDistro
 }
 
 /// <summary>
+/// A wsl.exe command line and the encoding wsl.exe writes its stdout in. The two travel together
+/// because the encoding differs by invocation, and pairing them keeps a call site from picking the
+/// wrong one.
+/// </summary>
+internal readonly record struct WslInvocation(string Arguments, Encoding Encoding);
+
+/// <summary>
 /// Runs commands inside the QwenTray distro through wsl.exe. The argument builders and the output
 /// parsers are static so they can be exercised without a distro present.
 /// </summary>
@@ -35,8 +42,16 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
     public const string SourceDistro = "Ubuntu-26.04";
     private const string UnixProgram = "/bin/bash";
 
+    // wsl.exe encodes its own messages as UTF-16LE but passes a child command's stdout through as
+    // raw UTF-8. Measured on this box: `wsl --list --quiet` emits 55 00 62 00, while
+    // `wsl -e /bin/bash -lc "echo ready"` emits 72 65 61 64 79 0A. Decoding a command's output as
+    // UTF-16LE turns "ready" into three garbage code units, which silently breaks every caller that
+    // reads it.
+    internal static readonly Encoding WslOutputEncoding = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
+    internal static readonly Encoding CommandOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     public async Task<WslCommandResult> ListDistrosAsync(CancellationToken cancellationToken)
-        => await ExecuteAsync(BuildArguments(["--list", "--quiet"]), input: null, cancellationToken);
+        => await ExecuteAsync(ListDistrosInvocation(), input: null, cancellationToken);
 
     public async Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken)
     {
@@ -46,41 +61,56 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
 
     /// <summary>Runs a shell script as <paramref name="user"/> inside the distro.</summary>
     public async Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken)
-        => await ExecuteAsync(BuildArguments(BuildScriptCommand(distro, user, script)), input: null, cancellationToken);
+        => await ExecuteAsync(ScriptInvocation(distro, user, script), input: null, cancellationToken);
 
     /// <summary>Runs a shell script with text on stdin, which keeps a secret off the command line.</summary>
     public async Task<WslCommandResult> RunScriptWithInputAsync(string distro, string user, string script, string input, CancellationToken cancellationToken)
-        => await ExecuteAsync(BuildArguments(BuildScriptCommand(distro, user, script)), input, cancellationToken);
+        => await ExecuteAsync(ScriptInvocation(distro, user, script), input, cancellationToken);
 
     /// <summary>
     /// Runs a shell script as root, which is what provisioning needs. Nothing here accepts a script
     /// that originates from user input.
     /// </summary>
     public async Task<WslCommandResult> RunRootScriptAsync(string distro, string script, CancellationToken cancellationToken)
-        => await ExecuteAsync(BuildArguments(BuildScriptCommand(distro, "root", script)), input: null, cancellationToken);
+        => await ExecuteAsync(ScriptInvocation(distro, "root", script), input: null, cancellationToken);
 
     public async Task<WslCommandResult> InstallDistroAsync(string distro, CancellationToken cancellationToken)
-        => await ExecuteAsync(BuildArguments(["--install", SourceDistro, "--name", distro, "--no-launch", "--web-download"]), input: null, cancellationToken);
+        => await ExecuteAsync(InstallDistroInvocation(distro), input: null, cancellationToken);
 
     public async Task<WslCommandResult> TerminateAsync(string distro, CancellationToken cancellationToken)
-        => await ExecuteAsync(BuildArguments(["--terminate", distro]), input: null, cancellationToken);
+        => await ExecuteAsync(TerminateInvocation(distro), input: null, cancellationToken);
 
     public IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile)
     {
+        var invocation = DaemonInvocation(settings, distro, profile);
         var startInfo = new ProcessStartInfo(Executable)
         {
-            Arguments = BuildArguments(DaemonSupervisor.BuildArguments(settings, distro, profile)),
+            Arguments = invocation.Arguments,
             RedirectStandardOutput = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-            StandardOutputEncoding = OutputEncoding,
+            StandardOutputEncoding = invocation.Encoding,
         };
 
         return processes.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {Executable}.");
     }
 
-    // wsl.exe writes UTF-16LE. The decoding has to match, or any non-ASCII output becomes mojibake.
-    internal static Encoding OutputEncoding { get; } = new UnicodeEncoding(bigEndian: false, byteOrderMark: false);
+    /// <summary>A wsl.exe subcommand. wsl.exe writes its own output as UTF-16LE.</summary>
+    internal static WslInvocation ListDistrosInvocation()
+        => new(BuildArguments(["--list", "--quiet"]), WslOutputEncoding);
+
+    internal static WslInvocation InstallDistroInvocation(string distro)
+        => new(BuildArguments(["--install", SourceDistro, "--name", distro, "--no-launch", "--web-download"]), WslOutputEncoding);
+
+    internal static WslInvocation TerminateInvocation(string distro)
+        => new(BuildArguments(["--terminate", distro]), WslOutputEncoding);
+
+    /// <summary>A command run inside the distro. Its stdout is the child's, so it is UTF-8.</summary>
+    internal static WslInvocation ScriptInvocation(string distro, string user, string script)
+        => new(BuildArguments(BuildScriptCommand(distro, user, script)), CommandOutputEncoding);
+
+    internal static WslInvocation DaemonInvocation(Settings settings, string distro, IdentityProfile profile)
+        => new(BuildArguments(DaemonSupervisor.BuildArguments(settings, distro, profile)), CommandOutputEncoding);
 
     /// <summary>
     /// Builds a command that runs <paramref name="script"/> through bash. The <c>-e</c> flag passes
@@ -114,16 +144,16 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
             .Select(line => line.Trim('\uFEFF'))
             .FirstOrDefault(line => line.Length > 0);
 
-    private async Task<WslCommandResult> ExecuteAsync(string arguments, string? input, CancellationToken cancellationToken)
+    private async Task<WslCommandResult> ExecuteAsync(WslInvocation invocation, string? input, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo(Executable)
         {
-            Arguments = arguments,
+            Arguments = invocation.Arguments,
             RedirectStandardOutput = true,
             RedirectStandardInput = input is not null,
             UseShellExecute = false,
             CreateNoWindow = true,
-            StandardOutputEncoding = OutputEncoding,
+            StandardOutputEncoding = invocation.Encoding,
         };
 
         var process = processes.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {Executable}.");
