@@ -312,7 +312,7 @@ public sealed class IdentityTests
     public void GpgKeyScriptIsIdempotentAndQuotesTheUid()
     {
         var script = IdentityService.BuildEnsureGpgKeyScript(new IdentityProfile { LinuxUser = "qwen" });
-        Assert.Contains("--list-secret-keys \"QwenTray qwen <qwen@qwentray.local>\"", script, StringComparison.Ordinal);
+        Assert.Contains("--list-secret-keys \"<qwen@qwentray.local>\"", script, StringComparison.Ordinal);
         Assert.Contains("||", script, StringComparison.Ordinal);
         Assert.Contains("--quick-generate-key \"QwenTray qwen <qwen@qwentray.local>\" ed25519 default never", script, StringComparison.Ordinal);
         Assert.Contains("--pinentry-mode loopback", script, StringComparison.Ordinal);
@@ -321,7 +321,7 @@ public sealed class IdentityTests
     [Fact]
     public void GpgExportScriptArmorsThePublicKey()
     {
-        Assert.Equal("gpg --armor --export \"QwenTray qwen <qwen@qwentray.local>\"", IdentityService.BuildGpgExportScript(new IdentityProfile { LinuxUser = "qwen" }));
+        Assert.Equal("gpg --armor --export \"<qwen@qwentray.local>\"", IdentityService.BuildGpgExportScript(new IdentityProfile { LinuxUser = "qwen" }));
     }
 
     [Fact]
@@ -346,6 +346,35 @@ public sealed class IdentityTests
     }
 
     [Fact]
+    public void TheSigningKeyNameDefaultsToTheProductAndUserAndCanBeOverridden()
+    {
+        var profile = new IdentityProfile { LinuxUser = "qwen" };
+        Assert.Equal("QwenTray qwen", profile.ResolvedGpgName);
+
+        profile.GpgName = "Ada Lovelace";
+        Assert.Equal("Ada Lovelace <qwen@qwentray.local>", IdentityService.GpgUserId(profile));
+        Assert.Contains("--quick-generate-key \"Ada Lovelace <qwen@qwentray.local>\"", IdentityService.BuildEnsureGpgKeyScript(profile), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARenamedSigningKeyIsStillFoundByItsEmail()
+    {
+        // gpg matches a user id as a substring, so a script that searches by the full uid strands the key
+        // the moment its name changes: it cannot be exported, and deleting it matches nothing and succeeds
+        // while leaving the key behind. Every lookup uses the email, which is what the key keeps.
+        var profile = new IdentityProfile { LinuxUser = "qwen", GpgName = "Ada Lovelace" };
+        Assert.DoesNotContain("Ada", IdentityService.BuildGpgExportScript(profile), StringComparison.Ordinal);
+
+        var delete = IdentityService.BuildDeleteGpgKeyScript(profile);
+        Assert.Contains("--list-secret-keys \"<qwen@qwentray.local>\"", delete, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ada", delete, StringComparison.Ordinal);
+
+        // Generation still names the key; only the search ignores the name, so a rename cannot make the
+        // profile grow a second key with the same email.
+        Assert.DoesNotContain("--list-secret-keys \"Ada", IdentityService.BuildEnsureGpgKeyScript(profile), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ASigningKeyEmailWithShellMetacharactersIsRejected()
     {
         Assert.True(new IdentityProfile { LinuxUser = "qwen" }.IsShellSafe);
@@ -354,6 +383,22 @@ public sealed class IdentityTests
         Assert.False(new IdentityProfile { LinuxUser = "qwen", Email = "me@example.com\"; touch /pwned; \"" }.IsShellSafe);
         Assert.False(new IdentityProfile { LinuxUser = "qwen", Email = "not an email" }.IsShellSafe);
         Assert.False(new IdentityProfile { LinuxUser = "qwen", Email = "a@b" }.IsShellSafe);
+    }
+
+    [Fact]
+    public void ASigningKeyNameWithShellMetacharactersIsRejected()
+    {
+        Assert.True(new IdentityProfile { LinuxUser = "qwen", GpgName = "Ada Lovelace" }.IsShellSafe);
+        Assert.True(new IdentityProfile { LinuxUser = "qwen", GpgName = "O'Brien-Dev_2.0, x" }.IsShellSafe);
+        Assert.True(new IdentityProfile { LinuxUser = "qwen", GpgName = new string('a', 64) }.IsShellSafe);
+
+        // Each of these would either expand inside the quoted user id or end the name where gpg expects
+        // the email to start.
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", GpgName = "Ada\"; touch /pwned; \"" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", GpgName = "$(touch /pwned)" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", GpgName = "Ada `touch /pwned`" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", GpgName = "Ada <me@example.com>" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", GpgName = new string('a', 65) }.IsShellSafe);
     }
 
     [Fact]
@@ -444,9 +489,9 @@ public sealed class IdentityTests
     {
         var script = IdentityService.BuildDeleteGpgKeyScript(new IdentityProfile { LinuxUser = "qwen" });
 
-        // gpg refuses to delete by uid in batch mode, so the uid only finds the key and the fingerprint
+        // gpg refuses to delete by uid in batch mode, so the email only finds the key and the fingerprint
         // is the delete target.
-        Assert.Contains("--list-secret-keys \"QwenTray qwen <qwen@qwentray.local>\"", script, StringComparison.Ordinal);
+        Assert.Contains("--list-secret-keys \"<qwen@qwentray.local>\"", script, StringComparison.Ordinal);
         Assert.Contains("grep \"^fpr:\"", script, StringComparison.Ordinal);
         Assert.Contains("cut -d: -f10", script, StringComparison.Ordinal);
         Assert.Contains("--delete-secret-and-public-key \"$fpr\"", script, StringComparison.Ordinal);

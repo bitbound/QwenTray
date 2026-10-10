@@ -14,10 +14,17 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     public const string SshKeyPath = "~/.ssh/id_ed25519";
 
     /// <summary>
-    /// The uid of a profile's signing key. The Linux user and the email are both restricted to
-    /// metacharacter-free charsets, so the result is safe to place inside the generation script.
+    /// The uid written onto a profile's signing key. The name and the email are both restricted to a
+    /// metacharacter-free charset, so the result is safe to place inside the generation script.
     /// </summary>
-    public static string GpgUserId(IdentityProfile profile) => $"QwenTray {profile.LinuxUser} <{profile.ResolvedEmail}>";
+    public static string GpgUserId(IdentityProfile profile) => $"{profile.ResolvedGpgName} <{profile.ResolvedEmail}>";
+
+    /// <summary>
+    /// The pattern that finds a profile's existing key. gpg treats a pattern wrapped in angle brackets
+    /// as an exact email match, so the key stays reachable when the display name changes. A full uid
+    /// matches only as a substring, which would leave a renamed key impossible to export or delete.
+    /// </summary>
+    public static string GpgKeySelector(IdentityProfile profile) => $"<{profile.ResolvedEmail}>";
 
     public async Task EnsureSshKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {
@@ -100,22 +107,23 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     internal static string BuildDeleteSshKeyScript() =>
         $"rm -f {SshKeyPath} {SshKeyPath}.pub";
 
-    // The signing key has no passphrase so the daemon can sign unattended. The uid is always quoted
-    // because it holds angle brackets and a space.
+    // The signing key has no passphrase so the daemon can sign unattended. The user id and the search
+    // pattern are always quoted because both hold angle brackets and a space.
     internal static string BuildEnsureGpgKeyScript(IdentityProfile profile)
     {
+        var selector = GpgKeySelector(profile);
         var uid = GpgUserId(profile);
-        return $"gpg --batch --list-secret-keys \"{uid}\" >/dev/null 2>&1 || gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key \"{uid}\" ed25519 default never";
+        return $"gpg --batch --list-secret-keys \"{selector}\" >/dev/null 2>&1 || gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key \"{uid}\" ed25519 default never";
     }
 
-    internal static string BuildGpgExportScript(IdentityProfile profile) => $"gpg --armor --export \"{GpgUserId(profile)}\"";
+    internal static string BuildGpgExportScript(IdentityProfile profile) => $"gpg --armor --export \"{GpgKeySelector(profile)}\"";
 
-    // gpg will not delete a key by uid in batch mode, so the key is resolved to its fingerprint first
-    // and the uid is only the search term.
+    // gpg will not delete a key by uid in batch mode, so the email only locates the key and its
+    // fingerprint is what gets deleted.
     internal static string BuildDeleteGpgKeyScript(IdentityProfile profile)
     {
-        var uid = GpgUserId(profile);
-        return $"fpr=$(gpg --batch --with-colons --list-secret-keys \"{uid}\" 2>/dev/null | grep \"^fpr:\" | cut -d: -f10 | head -1); "
+        var selector = GpgKeySelector(profile);
+        return $"fpr=$(gpg --batch --with-colons --list-secret-keys \"{selector}\" 2>/dev/null | grep \"^fpr:\" | cut -d: -f10 | head -1); "
             + "if [ -z \"$fpr\" ]; then exit 0; fi; "
             + "gpg --batch --yes --delete-secret-and-public-key \"$fpr\"";
     }

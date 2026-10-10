@@ -65,6 +65,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string _profileEmail = string.Empty;
 
     [ObservableProperty]
+    private string _profileGpgName = string.Empty;
+
+    [ObservableProperty]
     private string _distroStatus = string.Empty;
 
     [ObservableProperty]
@@ -449,7 +452,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         var unsafeProfile = Profiles.FirstOrDefault(profile => !profile.IsShellSafe);
         if (unsafeProfile is not null)
         {
-            SaveError = $"The \"{unsafeProfile.Name}\" profile has a Linux user, workspace, signing key email, or qwen path that is not allowed. Use a lowercase user name, a plain absolute path, and a plain email address.";
+            SaveError = $"The \"{unsafeProfile.Name}\" profile has a Linux user, workspace, signing key name or email, or qwen path that is not allowed. Use a lowercase user name, a plain absolute path, a plain email address, and a key name without quotes or shell characters.";
             return;
         }
 
@@ -1258,6 +1261,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         if (qwen.Length > 0) SelectedProfile.QwenExecutable = qwen;
         // Clearing the field restores the default email, so it is assigned even when empty.
         SelectedProfile.Email = ProfileEmail.Trim();
+        SelectedProfile.GpgName = ProfileGpgName.Trim();
     }
 
     partial void OnSelectedProfileChanged(IdentityProfile? value)
@@ -1268,6 +1272,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         ProfileWorkspace = value.WorkspaceDirectory;
         QwenExecutable = value.ResolvedQwenExecutable;
         ProfileEmail = value.ResolvedEmail;
+        ProfileGpgName = value.ResolvedGpgName;
 
         // The keys belong to the profile, so switching identities has to re-read them. The first switch
         // happens while the page is still loading, before the distro is known, and the refresh started

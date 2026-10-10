@@ -16,6 +16,11 @@ public sealed class IdentityProfile
     private static readonly Regex SafeAbsolutePathPattern = new("^/[A-Za-z0-9_./-]*$", RegexOptions.Compiled);
     private static readonly Regex GpgEmailPattern = new(@"\A[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\z", RegexOptions.Compiled);
 
+    // The name is placed in front of the email inside double quotes, so it may not carry a quote, a
+    // backslash, a dollar sign, or a backtick, and it may not carry angle brackets because those are
+    // how gpg delimits the email half of a user id.
+    private static readonly Regex GpgNamePattern = new(@"\A[A-Za-z0-9 ,'_.-]{1,64}\z", RegexOptions.Compiled);
+
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string LinuxUser { get; set; } = "";
@@ -26,6 +31,9 @@ public sealed class IdentityProfile
 
     /// <summary>The email on this profile's signing key. Empty means <see cref="ResolvedEmail"/>'s default.</summary>
     public string Email { get; set; } = "";
+
+    /// <summary>The display name on this profile's signing key. Empty means <see cref="ResolvedGpgName"/>'s default.</summary>
+    public string GpgName { get; set; } = "";
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string HomeDirectory => $"/home/{LinuxUser}";
@@ -41,18 +49,25 @@ public sealed class IdentityProfile
     [System.Text.Json.Serialization.JsonIgnore]
     public string ResolvedEmail => string.IsNullOrWhiteSpace(Email) ? $"{LinuxUser}@qwentray.local" : Email.Trim();
 
+    /// <summary>The name on the signing key, defaulted to the product and the Linux user when unset.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string ResolvedGpgName => string.IsNullOrWhiteSpace(GpgName) ? $"QwenTray {LinuxUser}" : GpgName.Trim();
+
     /// <summary>Whether every value is safe to place inside a root shell script.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsShellSafe => IsValidLinuxUser(LinuxUser)
         && IsSafeAbsolutePath(ResolvedQwenExecutable)
         && IsSafeAbsolutePath(ResolvedWorkspaceDirectory)
-        && IsValidGpgEmail(ResolvedEmail);
+        && IsValidGpgEmail(ResolvedEmail)
+        && IsValidGpgName(ResolvedGpgName);
 
     internal static bool IsValidLinuxUser(string? user) => user is not null && LinuxUserNamePattern.IsMatch(user);
 
     internal static bool IsSafeAbsolutePath(string? path) => path is not null && SafeAbsolutePathPattern.IsMatch(path);
 
     internal static bool IsValidGpgEmail(string? email) => email is not null && GpgEmailPattern.IsMatch(email);
+
+    internal static bool IsValidGpgName(string? name) => name is not null && GpgNamePattern.IsMatch(name);
 }
 
 public sealed class Settings
