@@ -147,7 +147,20 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
 
     /// <summary>A command run inside the distro. Its stdout is the child's, so it is UTF-8.</summary>
     internal static WslInvocation ScriptInvocation(string distro, string user, string script)
-        => new(BuildArguments(BuildScriptCommand(distro, user, script)), CommandOutputEncoding);
+        => new(BuildArguments(BuildScriptCommand(distro, user, CaptureErrorOutput(script))), CommandOutputEncoding);
+
+    /// <summary>
+    /// Wraps a script so a failing command's stderr is appended to its output. The process abstraction
+    /// only surfaces stdout, and most tools explain a failure on stderr, so without this a failed
+    /// command reports an empty reason. Stderr is dropped when the command succeeds, so callers that
+    /// parse the output are not thrown by a warning. The subshell keeps a script's own exit from
+    /// skipping the capture.
+    /// </summary>
+    internal static string CaptureErrorOutput(string script)
+        => "__qt_err=$(mktemp); "
+            + "( " + script + " ) 2>\"$__qt_err\"; __qt_status=$?; "
+            + "[ \"$__qt_status\" -eq 0 ] || cat \"$__qt_err\"; "
+            + "rm -f \"$__qt_err\"; exit \"$__qt_status\"";
 
     internal static WslInvocation DaemonInvocation(Settings settings, string distro, IdentityProfile profile)
         => new(BuildArguments(BuildDaemonCommand(distro, profile.LinuxUser, DaemonSupervisor.BuildServeArguments(settings, profile))), CommandOutputEncoding);

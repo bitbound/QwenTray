@@ -28,6 +28,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private readonly WslDistroProvisioner _provisioner;
     private readonly IdentityService _identity;
     private readonly WslConfigSyncService _sync;
+    private readonly DevToolInstaller _devTools;
     private readonly IProcessManager _processes;
     private readonly IUpdateService _updates;
     private readonly ISnackbarService _snackbars;
@@ -38,6 +39,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string _wslDistroName = string.Empty;
 
     public ObservableCollection<IdentityProfile> Profiles { get; } = [];
+
+    /// <summary>One row per installable developer tool. Built once, since this page is a singleton.</summary>
+    public ObservableCollection<DevToolRowViewModel> DevTools { get; } = [];
 
     [ObservableProperty]
     private IdentityProfile? _selectedProfile;
@@ -148,6 +152,12 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     [ObservableProperty]
     private bool _isSyncing;
+
+    [ObservableProperty]
+    private bool _isToolBusy;
+
+    [ObservableProperty]
+    private string? _toolProgress;
 
     [ObservableProperty]
     private string _qwenExecutable = string.Empty;
@@ -264,6 +274,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         WslDistroProvisioner provisioner,
         IdentityService identity,
         WslConfigSyncService sync,
+        DevToolInstaller devTools,
         IProcessManager processes,
         IUpdateService updates,
         ISnackbarService snackbars,
@@ -279,12 +290,18 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _provisioner = provisioner;
         _identity = identity;
         _sync = sync;
+        _devTools = devTools;
         _processes = processes;
         _updates = updates;
         _snackbars = snackbars;
         _confirm = confirm;
         _logger = logger;
         _supervisor.LocalControlPairingUrlChanged += OnLocalControlPairingUrlChanged;
+
+        foreach (var tool in DevToolInstaller.Catalog)
+        {
+            DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy));
+        }
     }
 
     public string SettingsFilePath => SettingsStore.FilePath;
@@ -862,6 +879,57 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             QwenProgress = null;
             IsQwenBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Installs one developer tool into the distro as root. The tools are shared by every profile, so
+    /// this does not depend on which one is selected.
+    /// </summary>
+    private async Task InstallToolAsync(DevTool tool)
+    {
+        var distro = WslDistroName.Trim();
+        if (string.IsNullOrWhiteSpace(distro))
+        {
+            _snackbars.Show("Set the WSL distro name first.", SnackbarKind.Error);
+            return;
+        }
+
+        if (HasCheckedDistro && !IsDistroProvisioned)
+        {
+            _snackbars.Show("Set up the Linux environment before installing developer tools.", SnackbarKind.Warning);
+            return;
+        }
+
+        IsToolBusy = true;
+        ToolProgress = $"Installing {tool.Name} in the distro. This can take a few minutes.";
+        try
+        {
+            var result = await _devTools.InstallAsync(distro, tool, CancellationToken.None);
+            if (!result.Succeeded)
+            {
+                _logger.LogWarning("Installing developer tool {Tool} reported: {Output}", tool.Id, result.Output);
+                _snackbars.Show($"Installing {tool.Name} failed: {result.Output}", SnackbarKind.Error);
+                return;
+            }
+
+            _snackbars.Show($"{tool.Name} is installed.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Installing developer tool {Tool} failed.", tool.Id);
+            _snackbars.Show($"Installing {tool.Name} failed: {ex.Message}", SnackbarKind.Error);
+        }
+        finally
+        {
+            ToolProgress = null;
+            IsToolBusy = false;
+        }
+    }
+
+    partial void OnIsToolBusyChanged(bool value)
+    {
+        // One install at a time: apt and the toolchain installers share locks and a PATH.
+        foreach (var tool in DevTools) tool.InstallCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand]

@@ -36,6 +36,28 @@ public sealed class WslCommandTests
     }
 
     [Fact]
+    public void InDistroCommandsFoldStderrIntoTheOutputOnlyOnFailure()
+    {
+        var script = WslDistro.CaptureErrorOutput("gh auth login --with-token");
+
+        // The command runs in a subshell, so a script's own exit cannot skip the capture.
+        Assert.Contains("( gh auth login --with-token ) 2>\"$__qt_err\"", script, StringComparison.Ordinal);
+        Assert.Contains("__qt_status=$?", script, StringComparison.Ordinal);
+        // stderr is shown only on a non-zero status, and the command's own status is what is returned.
+        Assert.Contains("[ \"$__qt_status\" -eq 0 ] || cat \"$__qt_err\"", script, StringComparison.Ordinal);
+        Assert.EndsWith("exit \"$__qt_status\"", script, StringComparison.Ordinal);
+        Assert.Contains("rm -f \"$__qt_err\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EveryInDistroInvocationCarriesTheCaptureWrapper()
+    {
+        var arguments = WslDistro.ScriptInvocation("QwenTray", "qwen", "echo hi").Arguments;
+        Assert.Contains("( echo hi ) 2>", arguments, StringComparison.Ordinal);
+        Assert.Contains("__qt_status", arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DistroNamesSurviveNulAndBomAndSplitOnEither()
     {
         Assert.Equal(["Ubuntu-26.04", "QwenTray", "docker-desktop"], WslDistro.ParseDistroNames("Ubuntu-26.04\r\n\0QwenTray\0\r\n\uFEFFdocker-desktop\r\n"));
@@ -248,6 +270,17 @@ public sealed class IdentityTests
     public void AuthStatusIsFalseWithoutAnAccountLine()
     {
         var status = IdentityService.ParseGitHubAuthStatus("github.com\n  X Not logged in to github.com\n");
+        Assert.False(status.IsAuthenticated);
+        Assert.Null(status.Account);
+    }
+
+    [Fact]
+    public void AFailedSignInLineIsNotReadAsAnAccount()
+    {
+        // gh names the account even when it refuses the token, and a failing gh folds that line onto
+        // stderr, which is now part of the command output.
+        var status = IdentityService.ParseGitHubAuthStatus(
+            "github.com\n  X Failed to log in to github.com account octocat (/home/qwen/.config/gh/hosts.yml)\n  - The token in /home/qwen/.config/gh/hosts.yml is invalid.\n");
         Assert.False(status.IsAuthenticated);
         Assert.Null(status.Account);
     }

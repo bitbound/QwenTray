@@ -172,6 +172,39 @@
 
         <Border Classes="Card">
           <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Developer tools" />
+
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="One-click installs that run inside the distro as root, so every identity profile shares them. Pressing a button again fetches the newest version and installs it over what is already there." />
+
+            <ItemsControl ItemsSource="{Binding DevTools}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:DevToolRowViewModel">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                      <TextBlock Classes="caption" Text="{Binding Summary}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="Install"
+                            Classes="Primary VariantOutlined"
+                            VerticalAlignment="Center"
+                            Margin="12,0,0,0"
+                            Command="{Binding InstallCommand}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="progress"
+                       Text="{Binding ToolProgress}"
+                       IsVisible="{Binding ToolProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Identity profiles" />
 
             <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto">

@@ -132,6 +132,9 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     {
         foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
+            // A failed sign-in also names the account ("Failed to log in to github.com account NAME"),
+            // and a failing gh folds that onto stderr, which is now part of the output.
+            if (line.Contains("Failed", StringComparison.OrdinalIgnoreCase)) continue;
             var marker = line.IndexOf("account", StringComparison.OrdinalIgnoreCase);
             if (marker < 0) continue;
             var rest = line[(marker + "account".Length)..].Trim();

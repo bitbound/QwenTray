@@ -104,6 +104,7 @@ internal static class Program
         services.AddSingleton<WslDistroProvisioner>();
         services.AddSingleton<IdentityService>();
         services.AddSingleton<WslConfigSyncService>();
+        services.AddSingleton<DevToolInstaller>();
         services.AddSingleton<RegistryAutostartService>();
         services.AddSingleton<DaemonSupervisor>();
         services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();
