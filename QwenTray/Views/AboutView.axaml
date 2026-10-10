@@ -48,17 +48,17 @@
                       VerticalAlignment="Center">
             <TextBlock Text="{Binding AppVersion}" VerticalAlignment="Center" />
             <Button Classes="Primary VariantText Small"
-                    Command="{Binding CheckForUpdatesCommand}"
-                    IsEnabled="{Binding !IsCheckingForUpdates}"
+                    Command="{Binding CheckOrApplyUpdateCommand}"
+                    IsEnabled="{Binding !IsUpdateBusy}"
                     VerticalAlignment="Center"
-                    ToolTip.Tip="Check GitHub Releases for a newer version">
+                    ToolTip.Tip="{Binding UpdateActionToolTip}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <PathIcon Data="{Binding UpdateStatusIconKey, Converter={StaticResource ResourceKeyToGeometryConverter}}"
-                          Classes.checking="{Binding IsCheckingForUpdates}"
+                          Classes.checking="{Binding IsUpdateBusy}"
                           Classes.upToDate="{Binding IsUpToDate}"
                           Classes.failed="{Binding HasUpdateCheckFailed}" />
                 <TextBlock Text="{Binding UpdateStatusText}"
-                           Classes.checking="{Binding IsCheckingForUpdates}"
+                           Classes.checking="{Binding IsUpdateBusy}"
                            Classes.upToDate="{Binding IsUpToDate}"
                            Classes.failed="{Binding HasUpdateCheckFailed}"
                            VerticalAlignment="Center" />

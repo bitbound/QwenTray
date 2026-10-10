@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Reflection;
 using Avalonia.Threading;
+using Microsoft.Extensions.Logging;
+using QwenTray.Services;
 using QwenTray.Updates;
 using QwenTray.Views;
 
@@ -15,6 +17,7 @@ public enum UpdateIndicatorState
     Checking,
     UpToDate,
     UpdateAvailable,
+    Applying,
     Failed,
 }
 
@@ -23,26 +26,31 @@ public sealed partial class AboutViewModel : ViewModelBase<AboutView>
     private const string RepositoryUrl = "https://github.com/bitbound/QwenTray";
 
     private readonly IUpdateService _updates;
+    private readonly ISnackbarService _snackbars;
+    private readonly ILogger<AboutViewModel> _logger;
 
     [ObservableProperty]
     private string _appVersion = string.Empty;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsCheckingForUpdates))]
+    [NotifyPropertyChangedFor(nameof(IsUpdateBusy))]
     [NotifyPropertyChangedFor(nameof(IsUpToDate))]
     [NotifyPropertyChangedFor(nameof(IsUpdateAvailable))]
     [NotifyPropertyChangedFor(nameof(HasUpdateCheckFailed))]
     [NotifyPropertyChangedFor(nameof(UpdateStatusText))]
     [NotifyPropertyChangedFor(nameof(UpdateStatusIconKey))]
+    [NotifyPropertyChangedFor(nameof(UpdateActionToolTip))]
     private UpdateIndicatorState _updateState = UpdateIndicatorState.NotChecked;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(UpdateStatusText))]
     private string? _availableVersion;
 
-    public AboutViewModel(IUpdateService updates)
+    public AboutViewModel(IUpdateService updates, ISnackbarService snackbars, ILogger<AboutViewModel> logger)
     {
         _updates = updates;
+        _snackbars = snackbars;
+        _logger = logger;
         _updates.UpdateAvailable += OnUpdateAvailable;
     }
 
@@ -50,7 +58,8 @@ public sealed partial class AboutViewModel : ViewModelBase<AboutView>
 
     public string IssuesUrl => $"{RepositoryUrl}/issues";
 
-    public bool IsCheckingForUpdates => UpdateState == UpdateIndicatorState.Checking;
+    /// <summary>Whether a check or an install is in flight, which disables the button.</summary>
+    public bool IsUpdateBusy => UpdateState is UpdateIndicatorState.Checking or UpdateIndicatorState.Applying;
 
     public bool IsUpToDate => UpdateState == UpdateIndicatorState.UpToDate;
 
@@ -65,6 +74,7 @@ public sealed partial class AboutViewModel : ViewModelBase<AboutView>
         UpdateIndicatorState.UpdateAvailable when AvailableVersion is { Length: > 0 } version =>
             $"Update available ({version})",
         UpdateIndicatorState.UpdateAvailable => "Update available",
+        UpdateIndicatorState.Applying => "Downloading...",
         UpdateIndicatorState.Failed => "Couldn't check. Click to retry",
         _ => "Check for updates",
     };
@@ -72,10 +82,15 @@ public sealed partial class AboutViewModel : ViewModelBase<AboutView>
     public string UpdateStatusIconKey => UpdateState switch
     {
         UpdateIndicatorState.UpToDate => "checkmark_circle_regular",
-        UpdateIndicatorState.UpdateAvailable => "arrow_download_regular",
+        UpdateIndicatorState.UpdateAvailable or UpdateIndicatorState.Applying => "arrow_download_regular",
         UpdateIndicatorState.Failed => "warning_regular",
         _ => "arrow_sync_regular",
     };
+
+    /// <summary>What pressing the button does from the current state, mirrored in its tooltip.</summary>
+    public string UpdateActionToolTip => IsUpdateAvailable
+        ? "Download and install this version"
+        : "Check GitHub Releases for a newer version";
 
     public IReadOnlyList<LibraryLink> Libraries { get; } =
     [
@@ -106,7 +121,22 @@ public sealed partial class AboutViewModel : ViewModelBase<AboutView>
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// The single button beside the version. It installs the update it already knows about, and
+    /// otherwise checks for one.
+    /// </summary>
     [RelayCommand]
+    private async Task CheckOrApplyUpdateAsync()
+    {
+        if (UpdateState == UpdateIndicatorState.UpdateAvailable && _updates.AvailableUpdate is not null)
+        {
+            await ApplyUpdateAsync();
+            return;
+        }
+
+        await CheckForUpdatesAsync();
+    }
+
     private async Task CheckForUpdatesAsync()
     {
         UpdateState = UpdateIndicatorState.Checking;
@@ -130,8 +160,33 @@ public sealed partial class AboutViewModel : ViewModelBase<AboutView>
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Update check failed: {ex}");
+            _logger.LogWarning(ex, "Could not check for a QwenTray update.");
             UpdateState = UpdateIndicatorState.Failed;
+        }
+    }
+
+    private async Task ApplyUpdateAsync()
+    {
+        if (_updates.AvailableUpdate is not { } update)
+        {
+            await CheckForUpdatesAsync();
+            return;
+        }
+
+        UpdateState = UpdateIndicatorState.Applying;
+        _snackbars.Show($"Downloading QwenTray {update.Version}…");
+
+        try
+        {
+            // A successful handoff replaces this process, so control never returns here.
+            await _updates.ApplyAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not install the QwenTray update.");
+            _snackbars.Show($"Could not install the update: {ex.Message}", SnackbarKind.Error);
+            // Back to the available state so the button offers the install again.
+            UpdateState = UpdateIndicatorState.UpdateAvailable;
         }
     }
 
