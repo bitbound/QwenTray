@@ -9,7 +9,7 @@ public interface IUpdateService
 
     event EventHandler<UpdateInfo>? UpdateAvailable;
 
-    Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken = default);
+    Task<UpdateCheckResult> CheckAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Downloads the update to a staging folder and hands off to it, which replaces this executable.

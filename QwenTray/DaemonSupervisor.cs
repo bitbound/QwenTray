@@ -352,6 +352,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             "--hostname", settings.Host,
             "--port", settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
+        // Without this the daemon registers process.cwd(), which is the profile's home, so the
+        // configured workspace directory would never become the workspace.
+        args.Add("--workspace");
+        args.Add(profile.ResolvedWorkspaceDirectory);
         if (!string.IsNullOrWhiteSpace(settings.Token)) { args.Add("--token"); args.Add(settings.Token.Trim()); }
         if (settings.RequireAuth) args.Add("--require-auth");
         if (settings.EnableSessionShell) args.Add("--enable-session-shell");

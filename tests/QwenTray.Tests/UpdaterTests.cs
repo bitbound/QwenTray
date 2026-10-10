@@ -173,6 +173,47 @@ public sealed class UpdateDigestTests
     }
 }
 
+public sealed class UpdateCheckScheduleTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void AnUncheckedAppIsDue()
+    {
+        Assert.True(UpdateCheckSchedule.IsDue(null, Now));
+    }
+
+    [Fact]
+    public void ARecentCheckIsNotDue()
+    {
+        Assert.False(UpdateCheckSchedule.IsDue(Now.AddHours(-1), Now));
+    }
+
+    [Fact]
+    public void ACheckJustUnderTheIntervalIsNotDue()
+    {
+        Assert.False(UpdateCheckSchedule.IsDue(Now - UpdateCheckSchedule.Interval + TimeSpan.FromSeconds(1), Now));
+    }
+
+    [Fact]
+    public void ACheckAtExactlyTheIntervalIsDue()
+    {
+        Assert.True(UpdateCheckSchedule.IsDue(Now - UpdateCheckSchedule.Interval, Now));
+    }
+
+    [Fact]
+    public void ACheckOlderThanTheIntervalIsDue()
+    {
+        Assert.True(UpdateCheckSchedule.IsDue(Now.AddDays(-3), Now));
+    }
+
+    [Fact]
+    public void AClockThatMovedBackwardIsNotDue()
+    {
+        Assert.False(UpdateCheckSchedule.IsDue(Now.AddHours(1), Now));
+    }
+}
+
 public sealed class GitHubReleaseUpdateServiceTests
 {
     // A finished x64 asset with a well-formed digest, as the release workflow publishes it.
@@ -201,12 +242,15 @@ public sealed class GitHubReleaseUpdateServiceTests
         var handler = new StubHandler(ReleaseJson);
         var service = CreateService(Info("2026.1.1.0"), handler);
 
-        var update = await service.CheckAsync(TestContext.Current.CancellationToken);
+        var result = await service.CheckAsync(TestContext.Current.CancellationToken);
 
+        Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
+        var update = result.Update;
         Assert.NotNull(update);
         Assert.Equal("v2026.10.9.0200", update!.Version);
         Assert.Equal("QwenTray-x64.exe", update.AssetName);
         Assert.Equal("https://example/QwenTray-x64.exe", update.DownloadUrl);
+        Assert.Equal(update, service.AvailableUpdate);
         Assert.Contains("QwenTray", handler.LastRequest!.Headers.UserAgent.ToString(), StringComparison.Ordinal);
     }
 
@@ -215,7 +259,11 @@ public sealed class GitHubReleaseUpdateServiceTests
     {
         var service = CreateService(Info("2026.10.9.0200"), new StubHandler(ReleaseJson));
 
-        Assert.Null(await service.CheckAsync(TestContext.Current.CancellationToken));
+        var result = await service.CheckAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(UpdateCheckStatus.UpToDate, result.Status);
+        Assert.Null(result.Update);
+        Assert.Null(service.AvailableUpdate);
     }
 
     [Fact]
@@ -232,19 +280,39 @@ public sealed class GitHubReleaseUpdateServiceTests
     }
 
     [Fact]
-    public async Task AnHttpFailureDegradesToNoUpdate()
+    public async Task AnHttpFailureIsReportedAsFailed()
     {
         var service = CreateService(Info("2026.1.1.0"), new StubHandler("{}", HttpStatusCode.NotFound));
 
-        Assert.Null(await service.CheckAsync(TestContext.Current.CancellationToken));
+        var result = await service.CheckAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(UpdateCheckStatus.Failed, result.Status);
     }
 
     [Fact]
-    public async Task AnUnrecognizedTagDegradesToNoUpdate()
+    public async Task AnUnrecognizedTagIsReportedUpToDate()
     {
         var service = CreateService(Info("2026.1.1.0"), new StubHandler("""{ "tag_name": "nightly" }"""));
 
-        Assert.Null(await service.CheckAsync(TestContext.Current.CancellationToken));
+        var result = await service.CheckAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(UpdateCheckStatus.UpToDate, result.Status);
+    }
+
+    [Fact]
+    public async Task ANewerReleaseWithNoUsableAssetIsReportedUpToDate()
+    {
+        // A newer tag whose assets do not include the expected executable leaves nothing to install,
+        // which is a current state rather than a failed check.
+        var release = """
+        { "tag_name": "v2026.10.9.0200", "assets": [ { "name": "source.zip", "state": "uploaded" } ] }
+        """;
+        var service = CreateService(Info("2026.1.1.0"), new StubHandler(release));
+
+        var result = await service.CheckAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(UpdateCheckStatus.UpToDate, result.Status);
+        Assert.Null(service.AvailableUpdate);
     }
 
     private sealed class StubHandler(string json, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler

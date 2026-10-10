@@ -188,7 +188,7 @@ public sealed class DaemonArgumentsTests
     {
         var settings = new Settings();
         var args = DaemonSupervisor.BuildArguments(settings, settings.WslDistroName, settings.ResolveActiveProfile());
-        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/home/qwen/.local/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170"], args);
+        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/home/qwen/.local/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170", "--workspace", "/home/qwen/workspace"], args);
     }
 
     [Fact]
@@ -233,6 +233,22 @@ public sealed class DaemonArgumentsTests
         Assert.Contains("--rate-limit", args);
         Assert.Contains("--debug", args);
         Assert.Contains("--safe-mode", args);
+    }
+
+    [Fact]
+    public void TheConfiguredWorkspaceIsPassedToTheDaemon()
+    {
+        // The daemon defaults its workspace to process.cwd(), which is the profile home, so the setting
+        // is only honored when it is passed explicitly.
+        var settings = new Settings();
+        var args = DaemonSupervisor.BuildServeArguments(settings, settings.ResolveActiveProfile());
+        var index = args.IndexOf("--workspace");
+        Assert.True(index >= 0, "the serve arguments must carry --workspace");
+        Assert.Equal("/home/qwen/workspace", args[index + 1]);
+
+        var profile = new IdentityProfile { LinuxUser = "dev", WorkspaceDirectory = "/srv/dev/proj" };
+        var custom = DaemonSupervisor.BuildServeArguments(settings, profile);
+        Assert.Equal("/srv/dev/proj", custom[custom.IndexOf("--workspace") + 1]);
     }
 
     [Fact]

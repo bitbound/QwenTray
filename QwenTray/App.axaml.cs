@@ -21,6 +21,7 @@ public partial class App : Application
 
     private DaemonSupervisor _supervisor = null!;
     private Settings _settings = null!;
+    private SettingsStore _settingsStore = null!;
     private RegistryAutostartService _autostart = null!;
     private WslDistroProvisioner _provisioner = null!;
     private IProcessManager _processes = null!;
@@ -31,6 +32,7 @@ public partial class App : Application
     private MainWindow? _mainWindow;
     private IMainWindowViewModel? _mainViewModel;
     private DispatcherTimer? _timer;
+    private DispatcherTimer? _updateTimer;
     private bool _daemonCommandBusy;
     private bool _isShellInitialized;
     private bool _isExiting;
@@ -51,6 +53,7 @@ public partial class App : Application
 
         var services = Services ?? throw new InvalidOperationException("The service container was not initialized before the UI started.");
         _settings = services.GetRequiredService<Settings>();
+        _settingsStore = services.GetRequiredService<SettingsStore>();
         _logger = services.GetRequiredService<ILogger<App>>();
         _autostart = services.GetRequiredService<RegistryAutostartService>();
         _supervisor = services.GetRequiredService<DaemonSupervisor>();
@@ -88,19 +91,42 @@ public partial class App : Application
 
         if (_settings.CheckForUpdates)
         {
-            _ = CheckForUpdatesAsync();
+            StartAutomaticUpdateChecks();
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-    private async Task CheckForUpdatesAsync()
+    // Automatic checks run at most once every two days. The last run is persisted, so restarting the
+    // app does not check again before the interval is up, and a long-running tray session checks once
+    // the timer fires.
+    private void StartAutomaticUpdateChecks()
     {
+        _ = CheckForUpdatesIfDueAsync();
+
+        _updateTimer = new DispatcherTimer { Interval = UpdateCheckSchedule.Interval };
+        _updateTimer.Tick += async (_, _) => await CheckForUpdatesIfDueAsync();
+        _updateTimer.Start();
+    }
+
+    private async Task CheckForUpdatesIfDueAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        if (!UpdateCheckSchedule.IsDue(_settings.LastUpdateCheckUtc, now))
+        {
+            return;
+        }
+
+        // Recorded before the request so an unreachable GitHub is not retried on the next launch.
+        _settings.LastUpdateCheckUtc = now;
+        _settingsStore.Save(_settings);
+
         try
         {
-            var update = await _updates.CheckAsync();
+            var result = await _updates.CheckAsync();
 
-            if (update is not null)
+            if (result.Update is { } update)
             {
                 _logger.LogInformation("A newer QwenTray is available: {Version}.", update.Version);
             }
@@ -193,7 +219,7 @@ public partial class App : Application
         try
         {
             // The window's banner is driven by the update service, so opening it is what reveals the news.
-            if (await _updates.CheckAsync() is not null)
+            if ((await _updates.CheckAsync()).Update is not null)
             {
                 ShowMainWindow();
             }
@@ -338,5 +364,6 @@ public partial class App : Application
         if (_stopping) return;
         _stopping = true;
         _timer?.Stop();
+        _updateTimer?.Stop();
     }
 }

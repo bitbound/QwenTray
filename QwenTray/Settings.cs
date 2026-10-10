@@ -68,6 +68,9 @@ public sealed class Settings
     public bool AutoRestart { get; set; } = true;
     public int MaxBackoffSeconds { get; set; } = 60;
     public bool CheckForUpdates { get; set; } = true;
+
+    /// <summary>When the automatic update check last ran, in UTC. Null means it has never run.</summary>
+    public DateTimeOffset? LastUpdateCheckUtc { get; set; }
     public string Token { get; set; } = "";
     public bool RequireAuth { get; set; }
     public bool EnableSessionShell { get; set; }

@@ -563,7 +563,7 @@
           <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Updates" />
 
-            <CheckBox Content="Check for a new QwenTray release when the app starts"
+            <CheckBox Content="Check for a new QwenTray release automatically every two days"
                       IsChecked="{Binding CheckForUpdates}" />
 
             <StackPanel Orientation="Horizontal" Spacing="8">

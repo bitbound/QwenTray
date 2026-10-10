@@ -800,11 +800,23 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
         try
         {
-            var update = await _updates.CheckAsync();
-            UpdateCheckStatus = update is null
-                ? "QwenTray is up to date."
-                : $"Version {update.Version} is available. Use the link in the status bar to install it.";
-            _snackbars.Show(UpdateCheckStatus, update is null ? SnackbarKind.Success : SnackbarKind.Info);
+            var result = await _updates.CheckAsync();
+
+            if (result.Update is { } update)
+            {
+                UpdateCheckStatus = $"Version {update.Version} is available. Use the link in the status bar to install it.";
+                _snackbars.Show(UpdateCheckStatus, SnackbarKind.Info);
+            }
+            else if (result.Status == QwenTray.Updates.UpdateCheckStatus.Failed)
+            {
+                UpdateCheckStatus = "Could not check for updates. See the log for details.";
+                _snackbars.Show(UpdateCheckStatus, SnackbarKind.Error);
+            }
+            else
+            {
+                UpdateCheckStatus = "QwenTray is up to date.";
+                _snackbars.Show(UpdateCheckStatus, SnackbarKind.Success);
+            }
         }
         catch (Exception ex)
         {

@@ -91,7 +91,7 @@ public sealed class WslCommandTests
         var command = WslDistro.BuildDaemonCommand("QwenTray", "qwen", DaemonSupervisor.BuildServeArguments(new Settings { Port = 4170 }, Settings.CreateDefaultProfile()));
         Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/bin/bash", "-lc"], command.Take(7));
         var script = command[7];
-        Assert.StartsWith("exec '/home/qwen/.local/bin/qwen' 'serve' '--hostname' '127.0.0.1' '--port' '4170'", script, StringComparison.Ordinal);
+        Assert.StartsWith("exec '/home/qwen/.local/bin/qwen' 'serve' '--hostname' '127.0.0.1' '--port' '4170' '--workspace' '/home/qwen/workspace'", script, StringComparison.Ordinal);
         Assert.EndsWith("' 2>&1", script, StringComparison.Ordinal);
     }
 
