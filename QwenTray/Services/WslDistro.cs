@@ -43,6 +43,9 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
 {
     public const string Executable = "wsl.exe";
     public const string SourceDistro = "Ubuntu-26.04";
+
+    /// <summary>The environment variable <c>qwen serve</c> reads the bearer token from.</summary>
+    public const string ServerTokenVariable = "QWEN_SERVER_TOKEN";
     private const string UnixProgram = "/bin/bash";
 
     // wsl.exe encodes its own messages as UTF-16LE but passes a child command's stdout through as
@@ -98,7 +101,35 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
             StandardOutputEncoding = invocation.Encoding,
         };
 
+        ApplyServeToken(startInfo, settings.Token);
+
         return processes.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {Executable}.");
+    }
+
+    /// <summary>
+    /// Hands the bearer token to the daemon through the environment instead of an argument, so it stays
+    /// off the wsl.exe command line. WSLENV is what forwards a Windows variable into the distro.
+    /// </summary>
+    internal static void ApplyServeToken(ProcessStartInfo startInfo, string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        startInfo.Environment[ServerTokenVariable] = token.Trim();
+        var existing = startInfo.Environment.TryGetValue("WSLENV", out var wslenv) ? wslenv : null;
+        startInfo.Environment["WSLENV"] = MergeWslenv(existing, ServerTokenVariable);
+    }
+
+    private static string MergeWslenv(string? existing, string name)
+    {
+        if (string.IsNullOrEmpty(existing))
+        {
+            return name;
+        }
+
+        return existing.Split(':').Contains(name, StringComparer.Ordinal) ? existing : existing + ":" + name;
     }
 
     /// <summary>A wsl.exe subcommand. wsl.exe writes its own output as UTF-16LE.</summary>

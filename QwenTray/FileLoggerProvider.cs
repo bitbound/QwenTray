@@ -15,15 +15,19 @@ public sealed class FileLoggerProvider(Func<IServiceProvider> servicesFactory, s
     private readonly string _path = path;
     private readonly object _gate = new();
     private IServiceProvider? _services;
+    private IFileSystem? _fileSystem;
     private bool _directoryReady;
     private bool _disposed;
 
-  private IFileSystem ResolveFileSystem()
+    private IFileSystem ResolveFileSystem()
     {
+        if (_fileSystem is not null) return _fileSystem;
         lock (_gate)
         {
             _services ??= _servicesFactory();
-            return _services.GetRequiredService<IFileSystem>();
+            // Cached so a write during container teardown, after the container refuses new resolves,
+            // still reaches the file instead of being lost.
+            return _fileSystem ??= _services.GetRequiredService<IFileSystem>();
         }
     }
 

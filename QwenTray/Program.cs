@@ -71,7 +71,13 @@ internal static class Program
         {
             App.Services = null;
             // DaemonSupervisor is IAsyncDisposable-only, so the container must be disposed asynchronously.
-            _services?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            // The Avalonia loop has already stopped, so awaiting on this thread would capture its
+            // dispatcher and the continuation would never run. Disposing from a thread-pool thread keeps
+            // the shutdown I/O off that dead context.
+            if (_services is { } services)
+            {
+                Task.Run(() => services.DisposeAsync().AsTask()).GetAwaiter().GetResult();
+            }
             _mutex.ReleaseMutex();
             _mutex.Dispose();
         }

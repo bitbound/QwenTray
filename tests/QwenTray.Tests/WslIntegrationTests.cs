@@ -112,6 +112,28 @@ public sealed class WslCommandTests
         var script = WslDistro.BuildDaemonScript(["--token", "a' ; touch /pwned ; echo '"]);
         Assert.Equal("exec '--token' 'a'\\'' ; touch /pwned ; echo '\\''' 2>&1", script);
     }
+
+    [Fact]
+    public void TheBearerTokenGoesIntoTheEnvironmentNotTheCommandLine()
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo(WslDistro.Executable);
+        WslDistro.ApplyServeToken(startInfo, "  sekret  ");
+
+        Assert.Equal("sekret", startInfo.Environment[WslDistro.ServerTokenVariable]);
+        Assert.Contains(WslDistro.ServerTokenVariable, startInfo.Environment["WSLENV"]!);
+        Assert.DoesNotContain("sekret", startInfo.Arguments);
+    }
+
+    [Fact]
+    public void ABlankTokenTouchesNothingInTheEnvironment()
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo(WslDistro.Executable);
+        var before = startInfo.Environment.Count;
+
+        WslDistro.ApplyServeToken(startInfo, "   ");
+
+        Assert.Equal(before, startInfo.Environment.Count);
+    }
 }
 
 public sealed class WslConfigTests

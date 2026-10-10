@@ -356,7 +356,8 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         // configured workspace directory would never become the workspace.
         args.Add("--workspace");
         args.Add(profile.ResolvedWorkspaceDirectory);
-        if (!string.IsNullOrWhiteSpace(settings.Token)) { args.Add("--token"); args.Add(settings.Token.Trim()); }
+        // The bearer token is passed through the environment (see WslDistro.StartDaemon) so it never
+        // appears on the shipped wsl.exe command line.
         if (settings.RequireAuth) args.Add("--require-auth");
         if (settings.EnableSessionShell) args.Add("--enable-session-shell");
         if (!settings.ServeWeb) args.Add("--no-web");
@@ -460,7 +461,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (string.Equals(_localControlPairingUrl, url, StringComparison.Ordinal)) return;
         _localControlPairingUrl = url;
         if (url is null) _localControlRedactionLogged = false;
-        LocalControlPairingUrlChanged?.Invoke(this, EventArgs.Empty);
+        // Nothing should react once teardown has begun, and a subscriber posting to the UI thread would
+        // target a dispatcher that is no longer running.
+        if (!_disposed) LocalControlPairingUrlChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void TryCaptureLogPath(string line)
@@ -511,7 +514,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         var previous = _lastPublished;
         _lastPublished = State;
         _logger.LogInformation("State {Previous} -> {State} (consecutive failures {Failures}).", previous, State, _machine.ConsecutiveFailures);
-        StateChanged?.Invoke(this, State);
+        if (!_disposed) StateChanged?.Invoke(this, State);
     }
 
     public async ValueTask DisposeAsync()

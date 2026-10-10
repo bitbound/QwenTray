@@ -174,7 +174,20 @@ public sealed class SettingsStore(IFileSystem fileSystem)
             return seeded;
         }
 
-        return System.Text.Json.JsonSerializer.Deserialize(fileSystem.ReadAllText(FilePath), QwenTrayJsonContext.Default.Settings) ?? new Settings();
+        var bytes = ReadAllBytes();
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize(SettingsCipher.Unprotect(bytes), QwenTrayJsonContext.Default.Settings) ?? new Settings();
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            // Not a DPAPI blob, so this file was written before encryption. Read it as plaintext and
+            // rewrite it protected.
+            var legacy = System.Text.Json.JsonSerializer.Deserialize(System.Text.Encoding.UTF8.GetString(bytes), QwenTrayJsonContext.Default.Settings) ?? new Settings();
+            TryMigrate(legacy);
+            return legacy;
+        }
     }
 
     public void Save(Settings settings)
@@ -184,8 +197,35 @@ public sealed class SettingsStore(IFileSystem fileSystem)
             fileSystem.CreateDirectory(DirectoryPath);
         }
 
-        fileSystem.WriteAllText(FilePath, System.Text.Json.JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings));
+        // settings.json carries the bearer token, so it is DPAPI-protected rather than left as plaintext.
+        WriteAllBytes(SettingsCipher.Protect(System.Text.Json.JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings)));
         RestrictToCurrentUser();
+    }
+
+    private byte[] ReadAllBytes()
+    {
+        using var stream = fileSystem.OpenFileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    private void WriteAllBytes(byte[] bytes)
+    {
+        using var stream = fileSystem.CreateFileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        stream.Write(bytes, 0, bytes.Length);
+    }
+
+    // A failed rewrite must not keep the app from starting, and must leave the file the user still has.
+    private void TryMigrate(Settings settings)
+    {
+        try
+        {
+            Save(settings);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     // The file-system abstraction has no ACL member, so this single write stays on the BCL. Losing it
@@ -203,6 +243,23 @@ public sealed class SettingsStore(IFileSystem fileSystem)
         security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(identity, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
         new System.IO.FileInfo(FilePath).SetAccessControl(security);
     }
+}
+
+/// <summary>
+/// Protects the settings file with DPAPI. The scope is the current Windows user, so the file only
+/// opens for the same account that wrote it.
+/// </summary>
+internal static class SettingsCipher
+{
+    private static readonly byte[] Entropy = System.Text.Encoding.UTF8.GetBytes("QwenTray.Settings.v1");
+
+    public static byte[] Protect(string plaintext) => System.Security.Cryptography.ProtectedData.Protect(
+        System.Text.Encoding.UTF8.GetBytes(plaintext),
+        Entropy,
+        System.Security.Cryptography.DataProtectionScope.CurrentUser);
+
+    public static string Unprotect(byte[] ciphertext) => System.Text.Encoding.UTF8.GetString(
+        System.Security.Cryptography.ProtectedData.Unprotect(ciphertext, Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser));
 }
 
 [System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]

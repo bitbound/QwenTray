@@ -212,8 +212,8 @@ public sealed class DaemonArgumentsTests
             ExtraArgs = ["--safe-mode"],
         };
         var args = DaemonSupervisor.BuildArguments(settings, settings.WslDistroName, settings.ResolveActiveProfile());
-        Assert.Contains("--token", args);
-        Assert.Contains("tok", args);
+        Assert.DoesNotContain("--token", args);
+        Assert.DoesNotContain("tok", args);
         Assert.Contains("--require-auth", args);
         Assert.Contains("--enable-session-shell", args);
         Assert.Contains("--no-web", args);
