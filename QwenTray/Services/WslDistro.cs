@@ -147,20 +147,7 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
 
     /// <summary>A command run inside the distro. Its stdout is the child's, so it is UTF-8.</summary>
     internal static WslInvocation ScriptInvocation(string distro, string user, string script)
-        => new(BuildArguments(BuildScriptCommand(distro, user, CaptureErrorOutput(script))), CommandOutputEncoding);
-
-    /// <summary>
-    /// Wraps a script so a failing command's stderr is appended to its output. The process abstraction
-    /// only surfaces stdout, and most tools explain a failure on stderr, so without this a failed
-    /// command reports an empty reason. Stderr is dropped when the command succeeds, so callers that
-    /// parse the output are not thrown by a warning. The subshell keeps a script's own exit from
-    /// skipping the capture.
-    /// </summary>
-    internal static string CaptureErrorOutput(string script)
-        => "__qt_err=$(mktemp); "
-            + "( " + script + " ) 2>\"$__qt_err\"; __qt_status=$?; "
-            + "[ \"$__qt_status\" -eq 0 ] || cat \"$__qt_err\"; "
-            + "rm -f \"$__qt_err\"; exit \"$__qt_status\"";
+        => new(BuildArguments(BuildScriptCommand(distro, user, script)), CommandOutputEncoding);
 
     internal static WslInvocation DaemonInvocation(Settings settings, string distro, IdentityProfile profile)
         => new(BuildArguments(BuildDaemonCommand(distro, profile.LinuxUser, DaemonSupervisor.BuildServeArguments(settings, profile))), CommandOutputEncoding);
@@ -216,13 +203,21 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
         {
             Arguments = invocation.Arguments,
             RedirectStandardOutput = true,
+            RedirectStandardError = true,
             RedirectStandardInput = input is not null,
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = invocation.Encoding,
+            StandardErrorEncoding = invocation.Encoding,
         };
 
         var process = processes.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {Executable}.");
+
+        // Both pipes are drained at once. Reading one to its end while the other fills its buffer
+        // deadlocks, and a command that fails can put plenty on stderr before it exits.
+        var outputTask = process.StandardOutput is { } outputReader ? outputReader.ReadToEndAsync(cancellationToken) : Task.FromResult(string.Empty);
+        var errorTask = process.StandardError is { } errorReader ? errorReader.ReadToEndAsync(cancellationToken) : Task.FromResult(string.Empty);
+
         if (input is not null && process.StandardInput is { } writer)
         {
             await writer.WriteAsync(input.AsMemory(), cancellationToken);
@@ -230,9 +225,24 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
             writer.Close();
         }
 
-        var output = process.StandardOutput is { } reader ? await reader.ReadToEndAsync(cancellationToken) : string.Empty;
+        await Task.WhenAll(outputTask, errorTask);
         await process.WaitForExitAsync(cancellationToken);
-        return new WslCommandResult(process.ExitCode, output.Trim('\0', '\uFEFF'));
+        return new WslCommandResult(process.ExitCode, CombineCommandOutput(process.ExitCode, outputTask.Result, errorTask.Result).Trim('\0', '\uFEFF'));
+    }
+
+    /// <summary>
+    /// Combines a command's two streams. Success keeps stdout alone, so callers that parse the output
+    /// are not thrown by a warning. Failure appends stderr, because that is where most tools explain
+    /// themselves. wsl.exe writes its own errors as UTF-16LE, which leaves a NUL between every
+    /// character once the stream has been read as the child's UTF-8, so NULs are dropped.
+    /// </summary>
+    internal static string CombineCommandOutput(int exitCode, string output, string error)
+    {
+        if (exitCode == 0) return output;
+
+        var stderr = error.Replace("\0", string.Empty).Trim();
+        if (stderr.Length == 0) return output;
+        return string.IsNullOrWhiteSpace(output) ? stderr : output.TrimEnd() + Environment.NewLine + stderr;
     }
 
     private static string QuoteArgument(string value)

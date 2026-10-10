@@ -36,25 +36,38 @@ public sealed class WslCommandTests
     }
 
     [Fact]
-    public void InDistroCommandsFoldStderrIntoTheOutputOnlyOnFailure()
+    public void ACommandThatSucceedsKeepsOnlyItsStdout()
     {
-        var script = WslDistro.CaptureErrorOutput("gh auth login --with-token");
-
-        // The command runs in a subshell, so a script's own exit cannot skip the capture.
-        Assert.Contains("( gh auth login --with-token ) 2>\"$__qt_err\"", script, StringComparison.Ordinal);
-        Assert.Contains("__qt_status=$?", script, StringComparison.Ordinal);
-        // stderr is shown only on a non-zero status, and the command's own status is what is returned.
-        Assert.Contains("[ \"$__qt_status\" -eq 0 ] || cat \"$__qt_err\"", script, StringComparison.Ordinal);
-        Assert.EndsWith("exit \"$__qt_status\"", script, StringComparison.Ordinal);
-        Assert.Contains("rm -f \"$__qt_err\"", script, StringComparison.Ordinal);
+        Assert.Equal("ready\n", WslDistro.CombineCommandOutput(0, "ready\n", "warning: something\n"));
     }
 
     [Fact]
-    public void EveryInDistroInvocationCarriesTheCaptureWrapper()
+    public void ACommandThatFailsCarriesItsStderrReason()
     {
-        var arguments = WslDistro.ScriptInvocation("QwenTray", "qwen", "echo hi").Arguments;
-        Assert.Contains("( echo hi ) 2>", arguments, StringComparison.Ordinal);
-        Assert.Contains("__qt_status", arguments, StringComparison.Ordinal);
+        Assert.Equal("error: Invalid token.", WslDistro.CombineCommandOutput(1, string.Empty, "error: Invalid token.\n"));
+    }
+
+    [Fact]
+    public void AFailureWithBothStreamsKeepsStdoutBeforeTheReason()
+    {
+        var combined = WslDistro.CombineCommandOutput(1, "partial output\n", "boom\n");
+        Assert.StartsWith("partial output", combined, StringComparison.Ordinal);
+        Assert.EndsWith("boom", combined, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFailureWithNothingOnStderrLeavesStdoutAlone()
+    {
+        Assert.Equal("partial", WslDistro.CombineCommandOutput(1, "partial", "   "));
+        Assert.Equal(string.Empty, WslDistro.CombineCommandOutput(1, string.Empty, string.Empty));
+    }
+
+    [Fact]
+    public void WslOwnUtf16ErrorLosesItsNulsWhenItIsReadAsUtf8()
+    {
+        // wsl.exe writes its own errors as UTF-16LE, so reading them as the child's UTF-8 leaves a NUL
+        // between every character. Those NULs are dropped to keep the message readable.
+        Assert.Equal("There", WslDistro.CombineCommandOutput(1, string.Empty, "T\0h\0e\0r\0e\0"));
     }
 
     [Fact]
