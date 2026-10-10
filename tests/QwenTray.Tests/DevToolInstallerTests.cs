@@ -28,7 +28,7 @@ public sealed class DevToolInstallerTests
     public void TheRequestedToolsAreAllPresent()
     {
         var ids = DevToolInstaller.Catalog.Select(tool => tool.Id).ToHashSet(StringComparer.Ordinal);
-        foreach (var id in new[] { "dotnet", "node", "azure-cli", "aspire", "cli-utils", "python", "go", "rust" })
+        foreach (var id in new[] { "dotnet", "node", "azure-cli", "aspire", "cli-utils", "python", "go", "rust", "browser", "docker" })
         {
             Assert.Contains(id, ids);
         }
@@ -118,5 +118,33 @@ public sealed class DevToolInstallerTests
 
         Assert.Contains(Tool("dotnet").Script, wsl.RootScripts);
         Assert.Empty(wsl.Scripts);
+    }
+
+    [Fact]
+    public void BrowserInstallsEdgeFromMicrosoftsFeedAndMakesItTheDefaultHandlerForEveryone()
+    {
+        var script = Tool("browser").Script;
+        Assert.Contains("https://packages.microsoft.com/repos/edge", script, StringComparison.Ordinal);
+        Assert.Contains("apt-get install -y microsoft-edge-stable", script, StringComparison.Ordinal);
+        // xdg-open reads the shared list, so a new profile has nothing of its own to set up.
+        Assert.Contains("/etc/xdg/mimeapps.list", script, StringComparison.Ordinal);
+        Assert.Contains("x-scheme-handler/https=microsoft-edge.desktop;", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DockerComesFromItsOwnSignedRepoAndIsEnabledForEveryHumanAccount()
+    {
+        var script = Tool("docker").Script;
+        Assert.Contains("https://download.docker.com/linux/ubuntu", script, StringComparison.Ordinal);
+        Assert.Contains("apt-get install -y docker-ce", script, StringComparison.Ordinal);
+        Assert.Contains("systemctl enable --now docker", script, StringComparison.Ordinal);
+        // A distro provisioned before this entry existed has no membership, so the install grants it.
+        Assert.Contains("usermod -aG docker", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AspireLeavesAWritableDirectoryForTheLogsItKeepsBesideTheInstallRoot()
+    {
+        Assert.Contains("install -d -m 1777 /usr/local/logs", Tool("aspire").Script, StringComparison.Ordinal);
     }
 }

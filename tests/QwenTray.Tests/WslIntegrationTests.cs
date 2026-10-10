@@ -230,6 +230,15 @@ public sealed class WslConfigTests
         Assert.Contains("id -u qwen", script, StringComparison.Ordinal);
         Assert.Contains("useradd -m -s /bin/bash qwen", script, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void UserCreationAlsoGrantsTheDockerGroupSoTheEngineWorksForEveryProfile()
+    {
+        var script = WslDistroProvisioner.BuildCreateUserScript(new IdentityProfile { LinuxUser = "qwen" });
+        // The group is created here so membership survives an engine install that happens later.
+        Assert.Contains("groupadd -f docker", script, StringComparison.Ordinal);
+        Assert.Contains("usermod -aG docker qwen", script, StringComparison.Ordinal);
+    }
 }
 
 public sealed class SyncEntryTests

@@ -211,8 +211,12 @@ public sealed class WslDistroProvisioner(
     internal static string BuildWriteFileScript(string path, string content)
         => $"printf %s {Convert.ToBase64String(Encoding.UTF8.GetBytes(content))} | base64 -d > {path}";
 
+    // Docker access is a group membership, and a profile created after the engine has been installed
+    // still needs it. Creating the group here is harmless, and the engine's postinst keeps whatever
+    // members it finds.
     internal static string BuildCreateUserScript(IdentityProfile profile) =>
-        $"id -u {profile.LinuxUser} >/dev/null 2>&1 || useradd -m -s /bin/bash {profile.LinuxUser}";
+        $"id -u {profile.LinuxUser} >/dev/null 2>&1 || useradd -m -s /bin/bash {profile.LinuxUser} "
+        + $"&& groupadd -f docker && usermod -aG docker {profile.LinuxUser}";
 
     internal static string BuildInstallQwenScript(IdentityProfile profile) =>
         $"sudo -u {profile.LinuxUser} -H bash -lc '{QwenInstallCommand} && mkdir -p {profile.ResolvedWorkspaceDirectory}'";

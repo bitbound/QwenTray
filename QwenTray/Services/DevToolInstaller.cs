@@ -24,6 +24,8 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
         new("python", "Python tooling", "python3 with venv and pip, plus the uv package manager.", InstallPython),
         new("go", "Go", "The latest Go toolchain.", InstallGo),
         new("rust", "Rust", "rustup with the stable toolchain.", InstallRust),
+        new("browser", "Web browser", "Microsoft Edge with xdg-utils, registered as the distro's default browser.", InstallBrowser),
+        new("docker", "Docker Engine", "The container engine and CLI, for app hosts that run dependencies in containers.", InstallDocker),
     ];
 
     public async Task<WslCommandResult> InstallAsync(string distro, DevTool tool, CancellationToken cancellationToken)
@@ -56,8 +58,11 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
 
     // The script is self-contained, so Aspire does not wait on the .NET SDK button. It lands in
     // /usr/local/bin, which is on the default path for every profile, and rerunning replaces it.
+    // The CLI writes its logs beside the install root, which is root-owned, so that directory is
+    // created writable and sticky rather than leaving every profile unable to start the CLI.
     private const string InstallAspire =
-        "curl -fsSL https://aspire.dev/install.sh | bash -s -- --install-path /usr/local/bin --skip-path";
+        "curl -fsSL https://aspire.dev/install.sh | bash -s -- --install-path /usr/local/bin --skip-path "
+        + "&& install -d -m 1777 /usr/local/logs";
 
     // Ubuntu ships the fd binary as fdfind, so the name people type is linked to it.
     private const string InstallCliUtils =
@@ -86,4 +91,34 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
         + "&& curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile default "
         + "&& chmod -R a+w /usr/local/rustup /usr/local/cargo "
         + "&& printf 'export RUSTUP_HOME=/usr/local/rustup\\nexport CARGO_HOME=/usr/local/cargo\\nexport PATH=/usr/local/cargo/bin:$PATH\\n' > /etc/profile.d/rust.sh";
+
+    // Edge is Chromium, and the Microsoft feed is already trusted for the Azure CLI, so one install
+    // serves the default browser, Aspire's launch-browser, and anything else that asks the desktop for
+    // a URL. The default is written where every profile reads it, because xdg-open consults the shared
+    // list rather than anything per-user.
+    private const string InstallBrowser =
+        "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y xdg-utils desktop-file-utils "
+        + "&& install -m 0755 -d /etc/apt/keyrings "
+        + "&& curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --yes -o /etc/apt/keyrings/microsoft.gpg "
+        + "&& chmod a+r /etc/apt/keyrings/microsoft.gpg "
+        + "&& echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/edge stable main\" > /etc/apt/sources.list.d/microsoft-edge.list "
+        + "&& apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y microsoft-edge-stable "
+        + "&& echo '[Default Applications]' > /etc/xdg/mimeapps.list "
+        + "&& echo 'x-scheme-handler/http=microsoft-edge.desktop;' >> /etc/xdg/mimeapps.list "
+        + "&& echo 'x-scheme-handler/https=microsoft-edge.desktop;' >> /etc/xdg/mimeapps.list "
+        + "&& update-desktop-database /usr/share/applications";
+
+    // Same signed-by keyring shape as the Azure CLI entry. The engine is enabled here because a sealed
+    // distro has no other boot step, and every human account joins the docker group so that installing
+    // the engine is enough on a distro that was provisioned before this entry existed.
+    private const string InstallDocker =
+        "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg "
+        + "&& install -m 0755 -d /etc/apt/keyrings "
+        + "&& curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc "
+        + "&& chmod a+r /etc/apt/keyrings/docker.asc "
+        + "&& echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release) stable\" > /etc/apt/sources.list.d/docker.list "
+        + "&& apt-get update "
+        + "&& DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin "
+        + "&& systemctl enable --now docker "
+        + "&& for account in $(awk -F: '$3 >= 1000 && $3 < 65534 { print $1 }' /etc/passwd); do usermod -aG docker \"$account\"; done";
 }
