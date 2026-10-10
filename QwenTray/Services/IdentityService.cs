@@ -14,10 +14,10 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     public const string SshKeyPath = "~/.ssh/id_ed25519";
 
     /// <summary>
-    /// The uid of a profile's signing key. It is built from the Linux user, which is restricted to a
-    /// metacharacter-free charset, so it is safe to place inside the generation script.
+    /// The uid of a profile's signing key. The Linux user and the email are both restricted to
+    /// metacharacter-free charsets, so the result is safe to place inside the generation script.
     /// </summary>
-    public static string GpgUserId(IdentityProfile profile) => $"QwenTray {profile.LinuxUser} <{profile.LinuxUser}@qwentray.local>";
+    public static string GpgUserId(IdentityProfile profile) => $"QwenTray {profile.LinuxUser} <{profile.ResolvedEmail}>";
 
     public async Task EnsureSshKeyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {
@@ -110,8 +110,15 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
 
     internal static string BuildGpgExportScript(IdentityProfile profile) => $"gpg --armor --export \"{GpgUserId(profile)}\"";
 
+    // gpg will not delete a key by uid in batch mode, so the key is resolved to its fingerprint first
+    // and the uid is only the search term.
     internal static string BuildDeleteGpgKeyScript(IdentityProfile profile)
-        => $"gpg --batch --yes --delete-secret-and-public-key \"{GpgUserId(profile)}\"";
+    {
+        var uid = GpgUserId(profile);
+        return $"fpr=$(gpg --batch --with-colons --list-secret-keys \"{uid}\" 2>/dev/null | grep \"^fpr:\" | cut -d: -f10 | head -1); "
+            + "if [ -z \"$fpr\" ]; then exit 0; fi; "
+            + "gpg --batch --yes --delete-secret-and-public-key \"$fpr\"";
+    }
 
     /// <summary>Reads the token from stdin so it never appears on a command line or in a process list.</summary>
     internal static string BuildGitHubTokenScript()

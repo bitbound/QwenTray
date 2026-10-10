@@ -193,6 +193,29 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
         }
     }
 
+    // A root shell for the operator to manage the box itself, distinct from the profile's shell, which
+    // is the daemon's unprivileged identity.
+    [RelayCommand]
+    private void OpenAdminShell()
+    {
+        var distro = _settings.WslDistroName;
+        if (!SettingsViewModel.IsSafeDistroName(distro))
+        {
+            _snackbars.Show("Fix the distro name before opening an admin shell.", SnackbarKind.Warning);
+            return;
+        }
+
+        try
+        {
+            _processes.Start("wt.exe", $"wsl.exe -d {distro} -u root", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Windows Terminal could not be started; falling back to wsl.exe.");
+            _processes.Start("wsl.exe", $"-d {distro} -u root", useShellExec: true);
+        }
+    }
+
     private async Task RunAsync(Func<Task> action)
     {
         IsBusy = true;

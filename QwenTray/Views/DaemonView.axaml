@@ -121,7 +121,7 @@
             <TextBlock Classes="caption" Text="{Binding WebUrl}" />
           </StackPanel>
 
-          <UniformGrid Columns="2" Rows="2">
+          <UniformGrid Columns="2" Rows="3">
             <Button Classes="Primary VariantOutlined Shortcut"
                     Command="{Binding OpenWebShellCommand}"
                     ToolTip.Tip="The daemon's own web UI, with the bearer token passed in the address.">
@@ -137,6 +137,15 @@
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <PathIcon Data="{StaticResource keyboard_regular}" />
                 <TextBlock Text="Open in Windows Terminal" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+
+            <Button Classes="Default VariantOutlined Shortcut"
+                    Command="{Binding OpenAdminShellCommand}"
+                    ToolTip.Tip="A root shell in the distro, for managing the box itself. Not the daemon's identity.">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <PathIcon Data="{StaticResource key_regular}" />
+                <TextBlock Text="Open admin shell (root)" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
 

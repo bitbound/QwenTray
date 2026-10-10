@@ -36,11 +36,30 @@ public sealed class ConfirmDialogService : IConfirmDialogService
             return Task.FromResult(false);
         }
 
-        return owner.ShowDialog<bool>(new ConfirmDialog(request));
+        var dialog = new ConfirmDialog(request);
+        return dialog.ShowDialog<bool>(owner);
     }
 
-    // The window hides rather than closes when it goes to the tray, so the main window is the owner
-    // whether or not it is on screen.
+    // A modal dialog needs an owner that is on screen, and Avalonia throws rather than showing one
+    // without. The tray keeps the main window hidden instead of closed, so it is brought back first.
+    // Every confirm is raised by a click inside that window, which is where the answer is expected.
     private static Window? ResolveOwner()
-        => (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+    {
+        var desktop = Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime;
+        var main = desktop?.MainWindow;
+
+        if (main is null)
+        {
+            return null;
+        }
+
+        if (!main.IsVisible)
+        {
+            main.Show();
+            main.WindowState = WindowState.Normal;
+            main.Activate();
+        }
+
+        return main.IsVisible ? main : null;
+    }
 }

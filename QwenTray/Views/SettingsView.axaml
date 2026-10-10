@@ -174,7 +174,7 @@
           <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Identity profiles" />
 
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto">
               <TextBlock Grid.Row="0" Classes="field" Text="Active profile" />
               <ComboBox Grid.Row="0" Grid.Column="1"
                         HorizontalAlignment="Stretch"
@@ -196,6 +196,14 @@
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
                            Text="The Linux user is this profile's identity. Its home holds the ssh key, gh token, git config, and Qwen Code settings." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="3" Classes="field" Text="Signing key email" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding ProfileEmail}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The email in the signing key's user id. Defaults to the Linux user at qwentray.local. Regenerate the key for a change to take effect." />
               </StackPanel>
             </Grid>
 

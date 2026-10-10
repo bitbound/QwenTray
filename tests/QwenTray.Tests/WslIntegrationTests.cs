@@ -266,6 +266,29 @@ public sealed class IdentityTests
     }
 
     [Fact]
+    public void TheSigningKeyEmailDefaultsToTheLinuxUserAndCanBeOverridden()
+    {
+        var profile = new IdentityProfile { LinuxUser = "qwen" };
+        Assert.Equal("qwen@qwentray.local", profile.ResolvedEmail);
+        Assert.Equal("QwenTray qwen <qwen@qwentray.local>", IdentityService.GpgUserId(profile));
+
+        profile.Email = "me@example.com";
+        Assert.Equal("QwenTray qwen <me@example.com>", IdentityService.GpgUserId(profile));
+        Assert.Contains("<me@example.com>", IdentityService.BuildEnsureGpgKeyScript(profile), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASigningKeyEmailWithShellMetacharactersIsRejected()
+    {
+        Assert.True(new IdentityProfile { LinuxUser = "qwen" }.IsShellSafe);
+        Assert.True(new IdentityProfile { LinuxUser = "qwen", Email = "me+sign@ex.co.uk" }.IsShellSafe);
+
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", Email = "me@example.com\"; touch /pwned; \"" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", Email = "not an email" }.IsShellSafe);
+        Assert.False(new IdentityProfile { LinuxUser = "qwen", Email = "a@b" }.IsShellSafe);
+    }
+
+    [Fact]
     public async Task ReadingTheGpgKeyAcceptsOnlyAnArmoredBlock()
     {
         const string armored = "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEaskSgBYJKwYBBAHaRw8BAQdAtWIb\n-----END PGP PUBLIC KEY BLOCK-----";
@@ -349,10 +372,17 @@ public sealed class IdentityTests
     }
 
     [Fact]
-    public void DeletingTheSigningKeyTakesTheSecretHalfAndQuotesTheUid()
+    public void DeletingTheSigningKeyResolvesTheFingerprintFirst()
     {
         var script = IdentityService.BuildDeleteGpgKeyScript(new IdentityProfile { LinuxUser = "qwen" });
-        Assert.Equal("gpg --batch --yes --delete-secret-and-public-key \"QwenTray qwen <qwen@qwentray.local>\"", script);
+
+        // gpg refuses to delete by uid in batch mode, so the uid only finds the key and the fingerprint
+        // is the delete target.
+        Assert.Contains("--list-secret-keys \"QwenTray qwen <qwen@qwentray.local>\"", script, StringComparison.Ordinal);
+        Assert.Contains("grep \"^fpr:\"", script, StringComparison.Ordinal);
+        Assert.Contains("cut -d: -f10", script, StringComparison.Ordinal);
+        Assert.Contains("--delete-secret-and-public-key \"$fpr\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("--delete-secret-and-public-key \"QwenTray", script, StringComparison.Ordinal);
     }
 
     [Fact]

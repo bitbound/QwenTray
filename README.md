@@ -71,6 +71,10 @@ Anything the agent needs has to exist in the distro. A Windows path will not wor
 shells out to a Windows binary fails. Profiles are separated by home directory only, so they still
 share CPU, memory, and network with each other.
 
+The profile users are deliberately unprivileged and cannot use `sudo`. **Open admin shell (root)** on
+the Daemon page gives you, the operator, a root shell in the distro for installing packages and
+editing its configuration, without granting the daemon those rights.
+
 ## Configuration Sync
 
 **Push to distro** copies entries from `%USERPROFILE%\.qwen` on Windows into the active profile's

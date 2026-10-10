@@ -58,6 +58,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string _profileWorkspace = string.Empty;
 
     [ObservableProperty]
+    private string _profileEmail = string.Empty;
+
+    [ObservableProperty]
     private string _distroStatus = string.Empty;
 
     [ObservableProperty]
@@ -429,7 +432,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         var unsafeProfile = Profiles.FirstOrDefault(profile => !profile.IsShellSafe);
         if (unsafeProfile is not null)
         {
-            SaveError = $"The \"{unsafeProfile.Name}\" profile has a Linux user or directory that is not allowed. Use a lowercase user name and a plain absolute path.";
+            SaveError = $"The \"{unsafeProfile.Name}\" profile has a Linux user, workspace, signing key email, or qwen path that is not allowed. Use a lowercase user name, a plain absolute path, and a plain email address.";
             return;
         }
 
@@ -1173,6 +1176,8 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         if (user.Length > 0) SelectedProfile.LinuxUser = user;
         if (ProfileWorkspace.Trim().Length > 0) SelectedProfile.WorkspaceDirectory = ProfileWorkspace.Trim();
         if (qwen.Length > 0) SelectedProfile.QwenExecutable = qwen;
+        // Clearing the field restores the default email, so it is assigned even when empty.
+        SelectedProfile.Email = ProfileEmail.Trim();
     }
 
     partial void OnSelectedProfileChanged(IdentityProfile? value)
@@ -1182,6 +1187,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         ProfileLinuxUser = value.LinuxUser;
         ProfileWorkspace = value.WorkspaceDirectory;
         QwenExecutable = value.ResolvedQwenExecutable;
+        ProfileEmail = value.ResolvedEmail;
 
         // The keys belong to the profile, so switching identities has to re-read them. The first switch
         // happens while the page is still loading, before the distro is known, and the refresh started
