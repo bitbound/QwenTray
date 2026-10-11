@@ -205,6 +205,54 @@
 
         <Border Classes="Card">
           <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Daemon" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Qwen executable" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding QwenExecutable}"
+                         ToolTip.Tip="Absolute Linux path to the Qwen launcher in the distro." />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The daemon runs inside the WSL distro as the active profile's Linux user, so this is a Linux path." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding Host}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The daemon's main address. 127.0.0.1 keeps it on this PC. A LAN address or 0.0.0.0 exposes it to the network and needs a token." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Port" Margin="0,10,0,0" />
+              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
+            </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Installed version" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Classes="field" Text="{Binding QwenVersion}" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="Check for updates"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding CheckQwenUpdateCommand}"
+                      IsEnabled="{Binding !IsQwenBusy}" />
+              <Button Content="Update Qwen"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding UpdateQwenCommand}"
+                      IsEnabled="{Binding !IsQwenBusy}" />
+            </StackPanel>
+
+            <TextBlock Classes="progress"
+                       Text="{Binding QwenProgress}"
+                       IsVisible="{Binding QwenProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Identity profiles" />
 
             <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
@@ -270,54 +318,6 @@
             <TextBlock Classes="caption"
                        TextWrapping="Wrap"
                        Text="Duplicate copies the name, user, and directory fields above into a new profile; leave them empty to get a copy with its own Linux user. Duplicating never copies keys or the GitHub sign-in, because that would be the same identity twice. Press Set up distro to create a new profile's Linux user. Saving with a different active profile restarts the daemon as that identity." />
-          </StackPanel>
-        </Border>
-
-        <Border Classes="Card">
-          <StackPanel Spacing="10">
-            <TextBlock Classes="h2" Text="Daemon" />
-
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
-              <TextBlock Grid.Row="0" Classes="field" Text="Qwen executable" />
-              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
-                <TextBox Text="{Binding QwenExecutable}"
-                         ToolTip.Tip="Absolute Linux path to the Qwen launcher in the distro." />
-                <TextBlock Classes="caption"
-                           TextWrapping="Wrap"
-                           Text="The daemon runs inside the WSL distro as the active profile's Linux user, so this is a Linux path." />
-              </StackPanel>
-
-              <TextBlock Grid.Row="1" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
-              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
-                <TextBox Text="{Binding Host}" />
-                <TextBlock Classes="caption"
-                           TextWrapping="Wrap"
-                           Text="The daemon's main address. 127.0.0.1 keeps it on this PC. A LAN address or 0.0.0.0 exposes it to the network and needs a token." />
-              </StackPanel>
-
-              <TextBlock Grid.Row="2" Classes="field" Text="Port" Margin="0,10,0,0" />
-              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
-            </Grid>
-
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
-              <TextBlock Grid.Row="0" Classes="field" Text="Installed version" />
-              <TextBlock Grid.Row="0" Grid.Column="1" Classes="field" Text="{Binding QwenVersion}" />
-            </Grid>
-
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-              <Button Content="Check for updates"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding CheckQwenUpdateCommand}"
-                      IsEnabled="{Binding !IsQwenBusy}" />
-              <Button Content="Update Qwen"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding UpdateQwenCommand}"
-                      IsEnabled="{Binding !IsQwenBusy}" />
-            </StackPanel>
-
-            <TextBlock Classes="progress"
-                       Text="{Binding QwenProgress}"
-                       IsVisible="{Binding QwenProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Border>
 
