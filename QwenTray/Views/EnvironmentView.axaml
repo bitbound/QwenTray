@@ -1,0 +1,247 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:QwenTray.ViewModels"
+             xmlns:conv="using:QwenTray.Converters"
+             xmlns:views="using:QwenTray.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="900"
+             x:Class="QwenTray.Views.EnvironmentView"
+             x:DataType="vm:EnvironmentViewModel">
+
+  <UserControl.Resources>
+    <conv:ResourceKeyToGeometryConverter x:Key="ResourceKeyToGeometryConverter" />
+  </UserControl.Resources>
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.field">
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Padding" Value="0,6,0,0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="Border.status">
+      <Setter Property="Padding" Value="14,12" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.status.bad">
+      <Setter Property="Background" Value="{DynamicResource SnackbarErrorBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ErrorColor}" />
+    </Style>
+    <Style Selector="Border.status.good">
+      <Setter Property="Background" Value="{DynamicResource SnackbarSuccessBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SuccessColor}" />
+    </Style>
+    <Style Selector="Border.status.neutral">
+      <Setter Property="Background" Value="{DynamicResource BackgroundGrayBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.statusTitle">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.statusDetail">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Border.status.bad TextBlock.statusTitle">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    </Style>
+    <Style Selector="Border.status.good TextBlock.statusTitle">
+      <Setter Property="Foreground" Value="{DynamicResource SuccessColor}" />
+    </Style>
+    <Style Selector="Border.status.neutral TextBlock.statusTitle">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="Border.status.bad PathIcon">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    </Style>
+    <Style Selector="Border.status.good PathIcon">
+      <Setter Property="Foreground" Value="{DynamicResource SuccessColor}" />
+    </Style>
+    <Style Selector="Border.status.neutral PathIcon">
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+
+    <!-- Set apart from the actions above it, because these ones cannot be undone. -->
+    <Style Selector="Border.DangerZone">
+      <Setter Property="Background" Value="{DynamicResource SnackbarErrorBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ErrorColor}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="14,12" />
+    </Style>
+
+    <Style Selector="TextBlock.dangerHeading">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource ErrorColor}" />
+    </Style>
+
+    <Style Selector="TextBlock.progress">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="*,Auto">
+
+    <ScrollViewer Grid.Row="0" Margin="20,20,20,0">
+      <StackPanel Spacing="16" MaxWidth="780" HorizontalAlignment="Left">
+
+        <TextBlock Classes="h1" Text="Environment" />
+
+        <Border Classes="Card">
+          <StackPanel Spacing="12">
+            <TextBlock Classes="h2" Text="Linux environment" />
+
+            <Border Classes="status"
+                    Classes.bad="{Binding DistroNeedsAttention}"
+                    Classes.good="{Binding DistroIsReady}"
+                    Classes.neutral="{Binding DistroIsChecking}">
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <PathIcon Width="28"
+                          Height="28"
+                          VerticalAlignment="Center"
+                          Data="{Binding DistroStatusIconKey, Converter={StaticResource ResourceKeyToGeometryConverter}}" />
+                <StackPanel Spacing="3">
+                  <TextBlock Classes="statusTitle" Text="{Binding DistroBannerTitle}" TextWrapping="Wrap" />
+                  <TextBlock Classes="statusDetail"
+                             Text="{Binding DistroStatus}"
+                             TextWrapping="Wrap"
+                             IsVisible="{Binding DistroStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <TextBlock Classes="caption"
+                             Text="{Binding DistroNextStep}"
+                             TextWrapping="Wrap"
+                             IsVisible="{Binding DistroNextStep, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="WSL distro" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding WslDistroName}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="QwenTray creates and owns this distro. Windows apps and drives are not available inside it." />
+              </StackPanel>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="{Binding SetupDistroLabel}"
+                      Classes="Primary VariantFilled"
+                      Command="{Binding SetupDistroCommand}"
+                      IsEnabled="{Binding CanSetupDistro}" />
+              <Button Content="Check status"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding RefreshDistroCommand}"
+                      IsEnabled="{Binding CanCheckDistro}" />
+            </StackPanel>
+
+            <TextBlock Classes="caption"
+                       Text="{Binding SetupDistroHelp}"
+                       TextWrapping="Wrap" />
+            <TextBlock Classes="progress"
+                       Text="{Binding DistroProgress}"
+                       IsVisible="{Binding DistroProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+            <Border Classes="DangerZone">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="dangerHeading" Text="Delete and rebuild" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Rebuild discards this distro and builds an empty one under the same name. Delete unregisters it and throws away its filesystem. Both take every profile's keys, GitHub sign-ins, workspaces, and Qwen configuration with them, and neither can be undone." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="Rebuild"
+                          Classes="Error VariantOutlined"
+                          Command="{Binding RebuildDistroCommand}"
+                          IsEnabled="{Binding CanRebuildDistro}" />
+                  <Button Content="Delete"
+                          Classes="Error VariantFilled"
+                          Command="{Binding DeleteDistroCommand}"
+                          IsEnabled="{Binding CanDeleteDistro}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Backup" />
+
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="One file carrying the whole distro together with this machine's QwenTray settings. An import protects those settings again for the account on the machine it lands on, so they travel unlocked and the bundle has to be kept somewhere private." />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Bundle file" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding BundlePath}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Export writes to this path and refuses to overwrite a file that is already there. For an import, point it at a bundle made earlier." />
+              </StackPanel>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="Export bundle"
+                      Classes="Primary VariantFilled"
+                      Command="{Binding ExportBundleCommand}"
+                      IsEnabled="{Binding CanExportBundle}" />
+              <Button Content="Import bundle"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding ImportBundleCommand}"
+                      IsEnabled="{Binding CanImportBundle}" />
+            </StackPanel>
+
+            <TextBlock Classes="progress"
+                       Text="{Binding BackupProgress}"
+                       IsVisible="{Binding BackupProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Developer tools" />
+
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="One-click installs that run inside the distro as root, so every identity profile shares them. Pressing a button again fetches the newest version and installs it over what is already there." />
+
+            <ItemsControl ItemsSource="{Binding DevTools}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:DevToolRowViewModel">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                      <TextBlock Classes="caption" Text="{Binding Summary}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="Install"
+                            Classes="Primary VariantOutlined"
+                            VerticalAlignment="Center"
+                            Margin="12,0,0,0"
+                            Command="{Binding InstallCommand}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Classes="progress"
+                       Text="{Binding ToolProgress}"
+                       IsVisible="{Binding ToolProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
+      </StackPanel>
+    </ScrollViewer>
+
+    <views:SettingsFooter Grid.Row="1" DataContext="{Binding Save}" />
+
+  </Grid>
+</UserControl>

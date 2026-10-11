@@ -83,6 +83,9 @@ public partial class MainWindowViewModel : ViewModelBase<MainWindow>, IMainWindo
         await base.OnInitializeAsync();
 
         NavigationItems.Add(new NavItemViewModel("play_regular", "Daemon", _navigation, typeof(DaemonViewModel)));
+        NavigationItems.Add(new NavItemViewModel("folder_regular", "Environment", _navigation, typeof(EnvironmentViewModel)));
+        NavigationItems.Add(new NavItemViewModel("key_regular", "Identity", _navigation, typeof(IdentityViewModel)));
+        NavigationItems.Add(new NavItemViewModel("code_regular", "Server", _navigation, typeof(ServerViewModel)));
         NavigationItems.Add(new NavItemViewModel("settings_regular", "Settings", _navigation, typeof(SettingsViewModel)));
         NavigationItems.Add(new NavItemViewModel("info_regular", "About", _navigation, typeof(AboutViewModel)));
 

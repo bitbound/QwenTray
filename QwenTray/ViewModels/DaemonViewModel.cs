@@ -176,7 +176,7 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     {
         var distro = _settings.WslDistroName;
         var profile = _settings.ResolveActiveProfile();
-        if (!SettingsViewModel.IsSafeDistroName(distro) || !IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
+        if (!Settings.IsSafeDistroName(distro) || !IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
         {
             _snackbars.Show("Fix the distro name or the profile's Linux user before opening a terminal.", SnackbarKind.Warning);
             return;
@@ -200,7 +200,7 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
     private void OpenAdminShell()
     {
         var distro = _settings.WslDistroName;
-        if (!SettingsViewModel.IsSafeDistroName(distro))
+        if (!Settings.IsSafeDistroName(distro))
         {
             _snackbars.Show("Fix the distro name before opening an admin shell.", SnackbarKind.Warning);
             return;

@@ -1,0 +1,35 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:QwenTray.ViewModels"
+             x:Class="QwenTray.Views.SettingsFooter"
+             x:DataType="vm:SettingsSaveViewModel">
+
+  <Border Classes="Footer">
+    <StackPanel Orientation="Horizontal" Spacing="12">
+      <Button Content="Save"
+              Classes="Primary VariantFilled"
+              Command="{Binding SaveCommand}" />
+
+      <TextBlock Text="{Binding SaveError}"
+                 Classes="Error"
+                 MaxWidth="420"
+                 TextWrapping="Wrap"
+                 VerticalAlignment="Center" />
+      <TextBlock Text="{Binding SaveMessage}"
+                 Classes="Success"
+                 Opacity="{Binding SaveMessageOpacity}"
+                 VerticalAlignment="Center">
+        <TextBlock.Transitions>
+          <Transitions>
+            <DoubleTransition Property="Opacity" Duration="0:0:0.3" />
+          </Transitions>
+        </TextBlock.Transitions>
+      </TextBlock>
+      <TextBlock Text="{Binding SaveWarning}"
+                 Classes="Warning"
+                 MaxWidth="420"
+                 TextWrapping="Wrap"
+                 VerticalAlignment="Center" />
+    </StackPanel>
+  </Border>
+</UserControl>

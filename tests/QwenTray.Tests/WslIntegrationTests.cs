@@ -470,14 +470,14 @@ public sealed class IdentityTests
     [Fact]
     public void DistroNamesAreRestrictedToASafeCharset()
     {
-        Assert.True(SettingsViewModel.IsSafeDistroName("QwenTray"));
-        Assert.True(SettingsViewModel.IsSafeDistroName("Qwen-Tray_2.0"));
-        Assert.False(SettingsViewModel.IsSafeDistroName("Distro & notepad.exe"));
-        Assert.False(SettingsViewModel.IsSafeDistroName("bad;name"));
+        Assert.True(Settings.IsSafeDistroName("QwenTray"));
+        Assert.True(Settings.IsSafeDistroName("Qwen-Tray_2.0"));
+        Assert.False(Settings.IsSafeDistroName("Distro & notepad.exe"));
+        Assert.False(Settings.IsSafeDistroName("bad;name"));
         // A leading dash or dot would be read as a wsl.exe option.
-        Assert.False(SettingsViewModel.IsSafeDistroName("-u"));
-        Assert.False(SettingsViewModel.IsSafeDistroName(".hidden"));
-        Assert.False(SettingsViewModel.IsSafeDistroName(string.Empty));
+        Assert.False(Settings.IsSafeDistroName("-u"));
+        Assert.False(Settings.IsSafeDistroName(".hidden"));
+        Assert.False(Settings.IsSafeDistroName(string.Empty));
     }
 
     [Theory]
@@ -491,15 +491,15 @@ public sealed class IdentityTests
     [InlineData("", false)]
     public void LinuxUserNamesAreValidated(string user, bool expected)
     {
-        Assert.Equal(expected, SettingsViewModel.IsValidLinuxUser(user));
+        Assert.Equal(expected, IdentityProfile.IsValidLinuxUser(user));
     }
 
     [Fact]
     public void SlugificationProducesAValidUserName()
     {
-        Assert.Equal("work_account", SettingsViewModel.SlugifyLinuxUser("Work Account"));
-        Assert.Equal("user1profile", SettingsViewModel.SlugifyLinuxUser("1profile"));
-        Assert.True(SettingsViewModel.IsValidLinuxUser(SettingsViewModel.SlugifyLinuxUser("Weird! Name?")));
+        Assert.Equal("work_account", IdentityProfile.SlugifyLinuxUser("Work Account"));
+        Assert.Equal("user1profile", IdentityProfile.SlugifyLinuxUser("1profile"));
+        Assert.True(IdentityProfile.IsValidLinuxUser(IdentityProfile.SlugifyLinuxUser("Weird! Name?")));
     }
 
     [Fact]

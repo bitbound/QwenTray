@@ -63,6 +63,15 @@ public sealed class IdentityProfile
 
     internal static bool IsValidLinuxUser(string? user) => user is not null && LinuxUserNamePattern.IsMatch(user);
 
+    /// <summary>Derives a suggestion for a Linux user name from a free-form profile name.</summary>
+    internal static string SlugifyLinuxUser(string value)
+    {
+        var lowered = value.Trim().ToLowerInvariant();
+        var cleaned = new string([.. lowered.Select(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' ? character : '_')]);
+        if (cleaned.Length == 0 || (!char.IsAsciiLetter(cleaned[0]) && cleaned[0] != '_')) cleaned = "user" + cleaned;
+        return cleaned.Length > 32 ? cleaned[..32] : cleaned;
+    }
+
     internal static bool IsSafeAbsolutePath(string? path) => path is not null && SafeAbsolutePathPattern.IsMatch(path);
 
     internal static bool IsValidGpgEmail(string? email) => email is not null && GpgEmailPattern.IsMatch(email);

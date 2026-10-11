@@ -1,0 +1,245 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:QwenTray.ViewModels"
+             xmlns:local="using:QwenTray"
+             xmlns:views="using:QwenTray.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="900"
+             x:Class="QwenTray.Views.IdentityView"
+             x:DataType="vm:IdentityViewModel">
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.field">
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Padding" Value="0,6,0,0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="*,Auto">
+
+    <ScrollViewer Grid.Row="0" Margin="20,20,20,0">
+      <StackPanel Spacing="16" MaxWidth="780" HorizontalAlignment="Left">
+
+        <TextBlock Classes="h1" Text="Identity" />
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Identity profiles" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Active profile" />
+              <ComboBox Grid.Row="0" Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        ItemsSource="{Binding Profiles}"
+                        SelectedItem="{Binding SelectedProfile}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate DataType="local:IdentityProfile">
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Profile name" Margin="0,10,0,0" />
+              <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding ProfileName}" />
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Linux user" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding ProfileLinuxUser}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The Linux user is this profile's identity. Its home holds the ssh key, gh token, git config, and Qwen Code settings." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="3" Classes="field" Text="Signing key name" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding ProfileGpgName}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The display name on the signing key. Defaults to QwenTray followed by the Linux user. Regenerate the key for a change to take effect." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="4" Classes="field" Text="Signing key email" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding ProfileEmail}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The email in the signing key's user id. Defaults to the Linux user at qwentray.local. Regenerate the key for a change to take effect." />
+              </StackPanel>
+            </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Workspace directory" />
+              <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding ProfileWorkspace}" />
+            </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="New profile name" />
+              <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding NewProfileName}" />
+
+              <TextBlock Grid.Row="1" Classes="field" Text="New profile user" Margin="0,10,0,0" />
+              <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding NewProfileUser}" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="Add profile" Classes="Primary VariantOutlined" Command="{Binding AddProfileCommand}" />
+              <Button Content="Duplicate" Classes="Primary VariantOutlined" Command="{Binding DuplicateProfileCommand}" />
+              <Button Content="Remove profile" Classes="Primary VariantOutlined" Command="{Binding RemoveProfileCommand}" />
+            </StackPanel>
+
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="Duplicate copies the name, user, and directory fields above into a new profile; leave them empty to get a copy with its own Linux user. Duplicating never copies keys or the GitHub sign-in, because that would be the same identity twice. Press Set up distro to create a new profile's Linux user. Saving with a different active profile restarts the daemon as that identity." />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Identity credentials" />
+
+            <TextBlock Classes="field" Text="SSH public key" />
+            <StackPanel Spacing="6">
+              <TextBox Text="{Binding SshPublicKey}"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       MinHeight="48"
+                       FontFamily="Consolas,Menlo,monospace" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Copy public key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding CopySshKeyCommand}"
+                        IsEnabled="{Binding HasSshPublicKey}" />
+                <Button Content="Generate key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding GenerateSshKeyCommand}"
+                        IsEnabled="{Binding CanManageIdentity}"
+                        IsVisible="{Binding !HasSshPublicKey}" />
+                <Button Content="Regenerate"
+                        Classes="Error VariantOutlined"
+                        Command="{Binding RegenerateSshKeyCommand}"
+                        IsEnabled="{Binding CanManageIdentity}"
+                        IsVisible="{Binding HasSshPublicKey}" />
+                <Button Content="Delete"
+                        Classes="Error VariantText"
+                        Command="{Binding DeleteSshKeyCommand}"
+                        IsEnabled="{Binding CanManageIdentity}"
+                        IsVisible="{Binding HasSshPublicKey}" />
+                <Button Content="Refresh"
+                        Classes="Default VariantText"
+                        Command="{Binding LoadIdentityCommand}"
+                        IsEnabled="{Binding CanManageIdentity}" />
+              </StackPanel>
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         Text="No ssh key for this profile yet. Generate key creates one in its home directory."
+                         IsVisible="{Binding !HasSshPublicKey}" />
+            </StackPanel>
+
+            <TextBlock Classes="field" Text="GPG public key" Margin="0,10,0,0" />
+            <StackPanel Spacing="6">
+              <TextBox Text="{Binding GpgPublicKey}"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       MinHeight="48"
+                       FontFamily="Consolas,Menlo,monospace" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Copy public key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding CopyGpgKeyCommand}"
+                        IsEnabled="{Binding HasGpgPublicKey}" />
+                <Button Content="Generate key"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding GenerateGpgKeyCommand}"
+                        IsEnabled="{Binding CanManageIdentity}"
+                        IsVisible="{Binding !HasGpgPublicKey}" />
+                <Button Content="Regenerate"
+                        Classes="Error VariantOutlined"
+                        Command="{Binding RegenerateGpgKeyCommand}"
+                        IsEnabled="{Binding CanManageIdentity}"
+                        IsVisible="{Binding HasGpgPublicKey}" />
+                <Button Content="Delete"
+                        Classes="Error VariantText"
+                        Command="{Binding DeleteGpgKeyCommand}"
+                        IsEnabled="{Binding CanManageIdentity}"
+                        IsVisible="{Binding HasGpgPublicKey}" />
+              </StackPanel>
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         Text="An ed25519 signing key with no passphrase, held in this profile's own keyring, so it can sign commits unattended." />
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         Text="No signing key for this profile yet. Generate key creates one in its keyring."
+                         IsVisible="{Binding !HasGpgPublicKey}" />
+            </StackPanel>
+
+            <TextBlock Classes="field" Text="GitHub token" Margin="0,10,0,0" />
+            <StackPanel Spacing="6">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox x:Name="GitHubTokenBox"
+                         Text="{Binding GitHubToken}"
+                         PasswordChar="&#x25CF;" />
+                <ToggleButton Grid.Column="1"
+                              Classes="Icon"
+                              IsChecked="{Binding #GitHubTokenBox.RevealPassword}"
+                              ToolTip.Tip="Show the token"
+                              Margin="4,0,0,0">
+                  <Panel>
+                    <PathIcon Data="{StaticResource eye_off_regular}" />
+                    <PathIcon Data="{StaticResource eye_show_regular}"
+                              IsVisible="{Binding #GitHubTokenBox.RevealPassword}" />
+                  </Panel>
+                </ToggleButton>
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Save token"
+                        Classes="Primary VariantFilled"
+                        Command="{Binding SaveGitHubTokenCommand}"
+                        IsEnabled="{Binding CanManageGitHub}" />
+                <Button Content="Sign out"
+                        Classes="Primary VariantOutlined"
+                        Command="{Binding SignOutGitHubCommand}"
+                        IsEnabled="{Binding CanManageGitHub}" />
+              </StackPanel>
+              <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GitHubAccountText}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Configuration sync" />
+
+            <TextBlock Classes="field" Text="Entries to sync" />
+            <TextBox Text="{Binding SyncEntries}"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     MinHeight="70"
+                     MaxHeight="200"
+                     FontFamily="Consolas,Menlo,monospace" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="One entry per line, relative to ~/.qwen. settings.json and projects are never synced." />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="Push to distro"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding PushConfigCommand}"
+                      IsEnabled="{Binding CanSyncConfig}" />
+              <Button Content="Pull from distro"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding PullConfigCommand}"
+                      IsEnabled="{Binding CanSyncConfig}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+      </StackPanel>
+    </ScrollViewer>
+
+    <views:SettingsFooter Grid.Row="1" DataContext="{Binding Save}" />
+
+  </Grid>
+</UserControl>

@@ -117,12 +117,19 @@ internal static class Program
 
         services.AddSingleton<INavigationProvider, NavigationProvider>();
         services.AddSingleton<IMainWindowViewModel, MainWindowViewModel>();
+        services.AddSingleton<SettingsSaveViewModel>();
         services.AddSingleton<DaemonViewModel>();
+        services.AddSingleton<EnvironmentViewModel>();
+        services.AddSingleton<IdentityViewModel>();
+        services.AddSingleton<ServerViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<AboutViewModel>();
 
         services.AddTransient<MainWindow>();
         services.AddTransient<DaemonView>();
+        services.AddTransient<EnvironmentView>();
+        services.AddTransient<IdentityView>();
+        services.AddTransient<ServerView>();
         services.AddTransient<SettingsView>();
         services.AddTransient<AboutView>();
 

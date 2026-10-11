@@ -1,0 +1,215 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:QwenTray.ViewModels"
+             xmlns:views="using:QwenTray.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="900"
+             x:Class="QwenTray.Views.ServerView"
+             x:DataType="vm:ServerViewModel">
+
+  <UserControl.Styles>
+    <Style Selector="TextBlock.field">
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Padding" Value="0,6,0,0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    </Style>
+
+    <Style Selector="TextBlock.progress">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="*,Auto">
+
+    <ScrollViewer Grid.Row="0" Margin="20,20,20,0">
+      <StackPanel Spacing="16" MaxWidth="780" HorizontalAlignment="Left">
+
+        <TextBlock Classes="h1" Text="Server" />
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Daemon" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Qwen executable" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <TextBox Text="{Binding QwenExecutable}"
+                         ToolTip.Tip="Absolute Linux path to the Qwen launcher in the distro." />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The daemon runs inside the WSL distro as the active profile's Linux user, so this is a Linux path." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Hostname to bind" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding Host}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="The daemon's main address. 127.0.0.1 keeps it on this PC. A LAN address or 0.0.0.0 exposes it to the network and needs a token." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Port" Margin="0,10,0,0" />
+              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding Port}" />
+            </Grid>
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Installed version" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Classes="field" Text="{Binding QwenVersion}" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="Check for updates"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding CheckQwenUpdateCommand}"
+                      IsEnabled="{Binding CanCheckQwen}" />
+              <Button Content="Update Qwen"
+                      Classes="Primary VariantOutlined"
+                      Command="{Binding UpdateQwenCommand}"
+                      IsEnabled="{Binding CanCheckQwen}" />
+            </StackPanel>
+
+            <TextBlock Classes="progress"
+                       Text="{Binding QwenProgress}"
+                       IsVisible="{Binding QwenProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Security" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Bearer token" />
+              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBox x:Name="TokenBox"
+                           Text="{Binding Token}"
+                           PasswordChar="&#x25CF;" />
+                  <ToggleButton Grid.Column="1"
+                                Classes="Icon"
+                                IsChecked="{Binding #TokenBox.RevealPassword}"
+                                ToolTip.Tip="Show the token"
+                                Margin="4,0,0,0">
+                    <Panel>
+                      <PathIcon Data="{StaticResource eye_off_regular}" />
+                      <PathIcon Data="{StaticResource eye_show_regular}"
+                                IsVisible="{Binding #TokenBox.RevealPassword}" />
+                    </Panel>
+                  </ToggleButton>
+                </Grid>
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Leave empty for a loopback-only daemon. A non-loopback bind needs a token. With one set, Open Web Shell passes it to the page in the address fragment." />
+              </StackPanel>
+
+              <CheckBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0"
+                        Content="Require auth, including on /health (--require-auth)"
+                        IsChecked="{Binding RequireAuth}" />
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Allowed origins" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding AllowedOrigins}"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         MinHeight="52" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="One per line. Needed behind a TLS-terminating proxy." />
+              </StackPanel>
+
+              <TextBlock Grid.Row="3" Classes="field" Text="TLS cert path" Margin="0,10,0,0" />
+              <TextBox Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Text="{Binding TlsCertPath}" />
+
+              <TextBlock Grid.Row="4" Classes="field" Text="TLS key path" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding TlsKeyPath}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Set both or neither. Enables https for the daemon and health check." />
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Capabilities" />
+
+            <CheckBox Content="Enable the session shell (--enable-session-shell)"
+                      IsChecked="{Binding EnableSessionShell}"
+                      ToolTip.Tip="Lets a connected client run terminal commands in the workspace." />
+
+            <CheckBox Content="Serve the Web Shell (--no-web disables it)"
+                      IsChecked="{Binding ServeWeb}" />
+
+            <StackPanel Spacing="6">
+              <CheckBox Content="Enable Local Control for paired devices"
+                        IsChecked="{Binding LocalControl}" />
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         Text="Pairs a phone over a separate private connection on one IPv4 interface. Keep the main address at 127.0.0.1, enable the Web Shell, then scan the QR code below. Do not combine with a LAN bind." />
+              <Border Background="{DynamicResource SurfaceBrush}" Padding="12" CornerRadius="8"
+                      IsVisible="{Binding HasLocalControlPairingQr}">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="field" Text="Scan with a device on the same trusted network" />
+                  <Image Source="{Binding LocalControlPairingQr}" Width="240" Height="240"
+                         HorizontalAlignment="Left" Stretch="Uniform" />
+                </StackPanel>
+              </Border>
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         IsVisible="{Binding ShowLocalControlPairingPending}"
+                         Text="No pairing QR yet. Start the daemon from the Daemon page, then check that Local Control is active." />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Limits" />
+
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto">
+              <TextBlock Grid.Row="0" Classes="field" Text="Max sessions" />
+              <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding MaxSessions}" />
+
+              <TextBlock Grid.Row="1" Classes="field" Text="Max connections" Margin="0,10,0,0" />
+              <TextBox Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding MaxConnections}" />
+
+              <TextBlock Grid.Row="2" Classes="field" Text="Event ring size" Margin="0,10,0,0" />
+              <TextBox Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding EventRingSize}" />
+            </Grid>
+
+            <CheckBox Content="Enable per-tier HTTP rate limiting (--rate-limit)"
+                      IsChecked="{Binding RateLimit}" />
+
+            <CheckBox Content="Debug logging (-d)"
+                      IsChecked="{Binding DebugMode}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="Card">
+          <StackPanel Spacing="10">
+            <TextBlock Classes="h2" Text="Extra daemon arguments" />
+
+            <TextBox Text="{Binding ExtraArgs}"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     MinHeight="70"
+                     MaxHeight="240"
+                     FontFamily="Consolas,Menlo,monospace" />
+            <TextBlock Classes="caption"
+                       TextWrapping="Wrap"
+                       Text="One argument per line, appended to the spawn command verbatim. Use this for flags this page does not surface." />
+          </StackPanel>
+        </Border>
+
+      </StackPanel>
+    </ScrollViewer>
+
+    <views:SettingsFooter Grid.Row="1" DataContext="{Binding Save}" />
+
+  </Grid>
+</UserControl>
