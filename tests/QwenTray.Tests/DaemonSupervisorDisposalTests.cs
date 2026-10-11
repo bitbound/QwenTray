@@ -19,6 +19,9 @@ internal sealed class FakeWslDistro : IWslDistro
 
     public List<(string Distro, string TargetDirectory, string TarPath)> Imports { get; } = [];
 
+    /// <summary>How many times a caller tried to boot the distro through this double.</summary>
+    public int StartDaemonCalls { get; private set; }
+
     public int ImportExitCode { get; set; }
 
     public int ExportExitCode { get; set; }
@@ -75,7 +78,10 @@ internal sealed class FakeWslDistro : IWslDistro
     }
 
     public IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile)
-        => throw new NotSupportedException("These tests never start a daemon.");
+    {
+        StartDaemonCalls++;
+        throw new NotSupportedException("These tests never start a daemon.");
+    }
 }
 
 // The ServiceProvider in Program.Main is the sole disposer of the supervisor singleton. These

@@ -31,6 +31,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     private Task? _restartTask;
     private CancellationTokenSource _shutdown = new();
     private DaemonState _lastPublished = DaemonState.Stopped;
+    private readonly object _holdGate = new();
+    private int _holdCount;
+    private string? _holdReason;
 
     public DaemonSupervisor(Settings settings, IWslDistro wsl, ILogger<DaemonSupervisor>? logger = null)
     {
@@ -54,6 +57,13 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(_logPath))
         {
             return _logPath;
+        }
+
+        // Asking the distro costs a wsl.exe call, which boots it. A hold exists to keep it down, and a
+        // log path is not worth breaking that for.
+        if (IsHeld)
+        {
+            return null;
         }
 
         var profile = _settings.ResolveActiveProfile();
@@ -148,11 +158,92 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     public event EventHandler<DaemonState>? StateChanged;
 
+    /// <summary>Raised when a hold is taken or the last one is released, so callers can re-check availability.</summary>
+    public event EventHandler? HeldChanged;
+
+    /// <summary>True while something works on the distro from outside it.</summary>
+    public bool IsHeld
+    {
+        get { lock (_holdGate) return _holdCount > 0; }
+    }
+
+    private string? HoldReason
+    {
+        get { lock (_holdGate) return _holdReason; }
+    }
+
+    /// <summary>
+    /// Stops the daemon and keeps it stopped until the returned scope is disposed. A caller that works
+    /// on the distro itself, rather than through the daemon, needs its filesystem still: without a hold
+    /// the stop looks like a crash to <see cref="PollAsync"/>, and the restart it schedules boots the
+    /// distro again in the middle of the operation.
+    /// </summary>
+    public async Task<IAsyncDisposable> HoldAsync(string reason)
+    {
+        lock (_holdGate)
+        {
+            _holdCount++;
+            _holdReason ??= reason;
+        }
+
+        RaiseHeldChanged();
+        try
+        {
+            await StopAsync();
+        }
+        catch
+        {
+            ReleaseHold();
+            throw;
+        }
+
+        _logger.LogInformation("The distro is held for {Reason}.", reason);
+        return new Hold(this);
+    }
+
+    private void ReleaseHold()
+    {
+        lock (_holdGate)
+        {
+            _holdCount--;
+            if (_holdCount <= 0)
+            {
+                _holdCount = 0;
+                _holdReason = null;
+            }
+        }
+
+        RaiseHeldChanged();
+    }
+
+    private void RaiseHeldChanged()
+    {
+        if (!_disposed) HeldChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private sealed class Hold(DaemonSupervisor owner) : IAsyncDisposable
+    {
+        private bool _released;
+
+        public ValueTask DisposeAsync()
+        {
+            if (_released) return ValueTask.CompletedTask;
+            _released = true;
+            owner.ReleaseHold();
+            return ValueTask.CompletedTask;
+        }
+    }
+
     public async Task StartAsync()
     {
         if (_disposed)
         {
             _logger.LogDebug("Start requested after disposal. Ignoring.");
+            return;
+        }
+        if (IsHeld)
+        {
+            _logger.LogInformation("Start requested while the distro is held for {Reason}; ignoring.", HoldReason);
             return;
         }
         if (State is DaemonState.Starting or DaemonState.Running)
@@ -175,6 +266,14 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             _adoptedMisses = 0;
             _logger.LogInformation("Adopting the daemon already answering on port {Port}.", _settings.Port);
             PublishState();
+            return;
+        }
+
+        // Everything above this line waited, so a hold taken while this start was in flight has to be
+        // re-checked before the distro is booted. Nothing between here and the spawn waits.
+        if (IsHeld)
+        {
+            _logger.LogInformation("A hold for {Reason} was taken while this start was checking health; the distro is not booted.", HoldReason);
             return;
         }
 
@@ -399,7 +498,12 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
     private void HandleUnexpectedExit()
     {
-        if (_intentionalExit || _disposed) return;
+        if (_disposed || _intentionalExit) return;
+        if (IsHeld)
+        {
+            _logger.LogInformation("The daemon host exited while the distro is held for {Reason}; no restart scheduled.", HoldReason);
+            return;
+        }
         _machine.UnexpectedExit();
         PublishState();
         if (!_settings.AutoRestart)

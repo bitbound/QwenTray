@@ -77,6 +77,7 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
         _logger = logger;
 
         _supervisor.StateChanged += (_, state) => Dispatcher.UIThread.Post(() => ApplyState(state));
+        _supervisor.HeldChanged += (_, _) => Dispatcher.UIThread.Post(() => ApplyState(_supervisor.State));
     }
 
     protected override Task OnInitializeAsync()
@@ -249,7 +250,7 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
 
     private void UpdateCommandAvailability(DaemonState state)
     {
-        var availability = DaemonCommandAvailability.From(state, _daemonCommandBusy);
+        var availability = DaemonCommandAvailability.From(state, _daemonCommandBusy || _supervisor.IsHeld);
         CanStart = availability.CanStart;
         CanStop = availability.CanStop;
         CanRestart = availability.CanRestart;

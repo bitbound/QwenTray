@@ -61,6 +61,7 @@ public partial class App : Application
         _navigation = services.GetRequiredService<INavigationProvider>();
         _updates = services.GetRequiredService<IUpdateService>();
         _supervisor.StateChanged += OnStateChanged;
+        _supervisor.HeldChanged += OnHeldChanged;
         _autostart.Changed += OnAutostartChanged;
         _updates.UpdateAvailable += OnUpdateAvailable;
         _icon = GetValue(TrayIcon.IconsProperty)?.FirstOrDefault();
@@ -266,6 +267,17 @@ public partial class App : Application
         Dispatcher.UIThread.Post(SetAutostartMenuChecked);
     }
 
+    private void OnHeldChanged(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => OnHeldChanged(sender, e));
+            return;
+        }
+
+        UpdateTrayCommandAvailability(_supervisor.State);
+    }
+
     private void OnStateChanged(object? sender, DaemonState state)
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -315,7 +327,7 @@ public partial class App : Application
 
     private void UpdateTrayCommandAvailability(DaemonState state)
     {
-        var availability = DaemonCommandAvailability.From(state, _daemonCommandBusy);
+        var availability = DaemonCommandAvailability.From(state, _daemonCommandBusy || _supervisor.IsHeld);
         SetMenuEnabled("Start", availability.CanStart);
         SetMenuEnabled("Stop", availability.CanStop);
         SetMenuEnabled("Restart", availability.CanRestart);

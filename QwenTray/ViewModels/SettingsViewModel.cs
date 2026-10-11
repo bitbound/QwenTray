@@ -99,6 +99,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     [NotifyPropertyChangedFor(nameof(CanSetupDistro))]
     [NotifyPropertyChangedFor(nameof(CanRebuildDistro))]
     [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
+    [NotifyPropertyChangedFor(nameof(CanCheckDistro))]
     private bool _isDistroBusy;
 
     [ObservableProperty]
@@ -124,6 +125,11 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
     [NotifyPropertyChangedFor(nameof(CanExportBundle))]
     [NotifyPropertyChangedFor(nameof(CanImportBundle))]
+    [NotifyPropertyChangedFor(nameof(CanCheckDistro))]
+    [NotifyPropertyChangedFor(nameof(CanCheckQwen))]
+    [NotifyPropertyChangedFor(nameof(CanManageIdentity))]
+    [NotifyPropertyChangedFor(nameof(CanManageGitHub))]
+    [NotifyPropertyChangedFor(nameof(CanSyncConfig))]
     private bool _isBackupBusy;
 
     [ObservableProperty]
@@ -133,6 +139,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string _qwenVersion = "Unknown";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCheckQwen))]
     private bool _isQwenBusy;
 
     [ObservableProperty]
@@ -159,15 +166,18 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private string _gitHubAccountText = "Unknown";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanManageGitHub))]
     private bool _isGitHubBusy;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanManageIdentity))]
     private bool _isIdentityBusy;
 
     [ObservableProperty]
     private string _syncEntries = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSyncConfig))]
     private bool _isSyncing;
 
     [ObservableProperty]
@@ -342,6 +352,17 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     public bool CanExportBundle => DistroExists && !IsDistroBusy && !IsBackupBusy;
 
     public bool CanImportBundle => !IsDistroBusy && !IsBackupBusy && !string.IsNullOrWhiteSpace(BundlePath);
+
+    // Every command below reads or writes inside the distro, so each needs the same room a backup needs.
+    public bool CanCheckDistro => !IsDistroBusy && !IsBackupBusy;
+
+    public bool CanCheckQwen => !IsQwenBusy && !IsBackupBusy;
+
+    public bool CanManageIdentity => !IsIdentityBusy && !IsBackupBusy;
+
+    public bool CanManageGitHub => !IsGitHubBusy && !IsBackupBusy;
+
+    public bool CanSyncConfig => !IsSyncing && !IsBackupBusy;
 
     public bool HasIdentityKeys => HasSshPublicKey || HasGpgPublicKey;
 
@@ -556,6 +577,10 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     private async Task RefreshEnvironmentAsync()
     {
+        // Opening the page probes inside the distro, which would boot it beside a running backup. The
+        // backup commands call this again once they are done, so nothing stays stale.
+        if (IsBackupBusy) return;
+
         await RefreshDistroAsync();
         if (IsDistroProvisioned)
         {
@@ -637,7 +662,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
             : "Creating the distro and installing Qwen and the gh CLI. This takes a few minutes on first run.";
         try
         {
-            await StopDaemonForDistroChangeAsync();
+            await using var distroHold = await _supervisor.HoldAsync("setting up the distro");
             _provisioner.WriteWslConfig();
             if (rebuild)
             {
@@ -688,7 +713,9 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         IsDistroBusy = true;
         try
         {
-            await StopDaemonForDistroChangeAsync();
+            // wsl refuses to unregister a running distro, and a daemon writing into a distro that is
+            // about to be deleted would lose its log the same way.
+            await using var distroHold = await _supervisor.HoldAsync("deleting the distro");
             await _provisioner.DeleteAsync(distro, CancellationToken.None);
             DistroExists = false;
             IsDistroProvisioned = false;
@@ -705,16 +732,6 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         {
             HasCheckedDistro = true;
             IsDistroBusy = false;
-        }
-    }
-
-    // wsl refuses to unregister a running distro, and a daemon writing into a distro that is about to
-    // be deleted would lose its log the same way.
-    private async Task StopDaemonForDistroChangeAsync()
-    {
-        if (_supervisor.State is DaemonState.Starting or DaemonState.Running)
-        {
-            await _supervisor.StopAsync();
         }
     }
 
@@ -738,7 +755,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         BackupProgress = "Stopping the distro and writing its filesystem into the bundle. This takes a few minutes.";
         try
         {
-            await StopDaemonForDistroChangeAsync();
+            await using var distroHold = await _supervisor.HoldAsync("exporting the bundle");
             var result = await _backup.ExportAsync(path, CancellationToken.None);
             DistroStatus = $"The \"{WslDistroName.Trim()}\" distro is set up and stopped by the export.";
             _snackbars.Show($"Wrote {DistroBackupService.FormatBytes(result.BundleBytes)} to {result.BundlePath}. It holds live credentials, so keep it somewhere private.", SnackbarKind.Success);
@@ -752,6 +769,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         {
             BackupProgress = null;
             IsBackupBusy = false;
+            await RefreshEnvironmentAsync();
         }
     }
 
@@ -796,7 +814,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         BackupProgress = "Unpacking the bundle and registering the distro. This takes a few minutes.";
         try
         {
-            await StopDaemonForDistroChangeAsync();
+            await using var distroHold = await _supervisor.HoldAsync("importing the bundle");
             var manifest = await _backup.ImportAsync(path, CancellationToken.None);
             await InitializeAsync();
             _snackbars.Show($"Imported the \"{manifest.WslDistroName}\" distro. Sign in to Windows again or run 'wsl --shutdown' so the mirrored networking change takes effect.", SnackbarKind.Success);
@@ -810,6 +828,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         {
             BackupProgress = null;
             IsBackupBusy = false;
+            await RefreshEnvironmentAsync();
         }
     }
 
@@ -1394,7 +1413,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         // The keys belong to the profile, so switching identities has to re-read them. The first switch
         // happens while the page is still loading, before the distro is known, and the refresh started
         // there covers it.
-        if (HasCheckedDistro && IsDistroProvisioned)
+        if (HasCheckedDistro && IsDistroProvisioned && !IsBackupBusy)
         {
             _ = LoadIdentityCoreAsync(announce: false);
         }

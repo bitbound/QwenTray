@@ -139,7 +139,7 @@
               <Button Content="Check status"
                       Classes="Primary VariantOutlined"
                       Command="{Binding RefreshDistroCommand}"
-                      IsEnabled="{Binding !IsDistroBusy}" />
+                      IsEnabled="{Binding CanCheckDistro}" />
             </StackPanel>
 
             <TextBlock Classes="caption"
@@ -273,11 +273,11 @@
               <Button Content="Check for updates"
                       Classes="Primary VariantOutlined"
                       Command="{Binding CheckQwenUpdateCommand}"
-                      IsEnabled="{Binding !IsQwenBusy}" />
+                      IsEnabled="{Binding CanCheckQwen}" />
               <Button Content="Update Qwen"
                       Classes="Primary VariantOutlined"
                       Command="{Binding UpdateQwenCommand}"
-                      IsEnabled="{Binding !IsQwenBusy}" />
+                      IsEnabled="{Binding CanCheckQwen}" />
             </StackPanel>
 
             <TextBlock Classes="progress"
@@ -376,22 +376,22 @@
                 <Button Content="Generate key"
                         Classes="Primary VariantOutlined"
                         Command="{Binding GenerateSshKeyCommand}"
-                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsEnabled="{Binding CanManageIdentity}"
                         IsVisible="{Binding !HasSshPublicKey}" />
                 <Button Content="Regenerate"
                         Classes="Error VariantOutlined"
                         Command="{Binding RegenerateSshKeyCommand}"
-                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsEnabled="{Binding CanManageIdentity}"
                         IsVisible="{Binding HasSshPublicKey}" />
                 <Button Content="Delete"
                         Classes="Error VariantText"
                         Command="{Binding DeleteSshKeyCommand}"
-                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsEnabled="{Binding CanManageIdentity}"
                         IsVisible="{Binding HasSshPublicKey}" />
                 <Button Content="Refresh"
                         Classes="Default VariantText"
                         Command="{Binding LoadIdentityCommand}"
-                        IsEnabled="{Binding !IsIdentityBusy}" />
+                        IsEnabled="{Binding CanManageIdentity}" />
               </StackPanel>
               <TextBlock Classes="caption"
                          TextWrapping="Wrap"
@@ -415,17 +415,17 @@
                 <Button Content="Generate key"
                         Classes="Primary VariantOutlined"
                         Command="{Binding GenerateGpgKeyCommand}"
-                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsEnabled="{Binding CanManageIdentity}"
                         IsVisible="{Binding !HasGpgPublicKey}" />
                 <Button Content="Regenerate"
                         Classes="Error VariantOutlined"
                         Command="{Binding RegenerateGpgKeyCommand}"
-                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsEnabled="{Binding CanManageIdentity}"
                         IsVisible="{Binding HasGpgPublicKey}" />
                 <Button Content="Delete"
                         Classes="Error VariantText"
                         Command="{Binding DeleteGpgKeyCommand}"
-                        IsEnabled="{Binding !IsIdentityBusy}"
+                        IsEnabled="{Binding CanManageIdentity}"
                         IsVisible="{Binding HasGpgPublicKey}" />
               </StackPanel>
               <TextBlock Classes="caption"
@@ -459,11 +459,11 @@
                 <Button Content="Save token"
                         Classes="Primary VariantFilled"
                         Command="{Binding SaveGitHubTokenCommand}"
-                        IsEnabled="{Binding !IsGitHubBusy}" />
+                        IsEnabled="{Binding CanManageGitHub}" />
                 <Button Content="Sign out"
                         Classes="Primary VariantOutlined"
                         Command="{Binding SignOutGitHubCommand}"
-                        IsEnabled="{Binding !IsGitHubBusy}" />
+                        IsEnabled="{Binding CanManageGitHub}" />
               </StackPanel>
               <TextBlock Classes="caption" TextWrapping="Wrap" Text="{Binding GitHubAccountText}" />
             </StackPanel>
@@ -489,11 +489,11 @@
               <Button Content="Push to distro"
                       Classes="Primary VariantOutlined"
                       Command="{Binding PushConfigCommand}"
-                      IsEnabled="{Binding !IsSyncing}" />
+                      IsEnabled="{Binding CanSyncConfig}" />
               <Button Content="Pull from distro"
                       Classes="Primary VariantOutlined"
                       Command="{Binding PullConfigCommand}"
-                      IsEnabled="{Binding !IsSyncing}" />
+                      IsEnabled="{Binding CanSyncConfig}" />
             </StackPanel>
           </StackPanel>
         </Border>
