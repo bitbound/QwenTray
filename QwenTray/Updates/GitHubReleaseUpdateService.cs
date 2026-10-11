@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Http;
 using System.Text.Json;
 using Bitbound.SystemAbstractions.FileSystem;
 using Bitbound.SystemAbstractions.Processes;

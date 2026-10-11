@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using QwenTray;
 using Xunit;
 
 namespace QwenTray.Tests;

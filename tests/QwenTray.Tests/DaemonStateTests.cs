@@ -1,4 +1,3 @@
-using QwenTray;
 using Xunit;
 
 namespace QwenTray.Tests;

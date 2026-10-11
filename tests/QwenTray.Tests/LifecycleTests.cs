@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using QwenTray;
 using QwenTray.Services;
 using Xunit;
 

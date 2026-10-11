@@ -1,6 +1,5 @@
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
-using QwenTray;
 using QwenTray.Services;
 using QwenTray.ViewModels;
 using Xunit;
@@ -22,6 +21,8 @@ public sealed class WslCommandTests
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ListDistrosInvocation().Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.InstallDistroInvocation("D").Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.TerminateInvocation("D").Encoding.CodePage);
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ExportInvocation("D", "t").Encoding.CodePage);
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ImportInvocation("D", "l", "t").Encoding.CodePage);
         Assert.Equal(Encoding.UTF8.CodePage, WslDistro.ScriptInvocation("D", "u", "s").Encoding.CodePage);
         Assert.Equal(Encoding.UTF8.CodePage, WslDistro.DaemonInvocation(new Settings(), "D", Settings.CreateDefaultProfile()).Encoding.CodePage);
     }
@@ -105,6 +106,24 @@ public sealed class WslCommandTests
     {
         Assert.Equal("--unregister QwenTray", WslDistro.UnregisterInvocation("QwenTray").Arguments);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.UnregisterInvocation("QwenTray").Encoding.CodePage);
+    }
+
+    [Fact]
+    public void ExportNamesItsFileAndImportNamesItsTargetAndItsVersion()
+    {
+        Assert.Equal("""--export QwenTray D:\backups\distro.tar""", WslDistro.ExportInvocation("QwenTray", @"D:\backups\distro.tar").Arguments);
+
+        // The version is named because a host whose default is WSL 1 would otherwise register the
+        // filesystem as something QwenTray cannot boot.
+        Assert.Equal(
+            """--import QwenTray D:\wsl\QwenTray D:\backups\distro.tar --version 2""",
+            WslDistro.ImportInvocation("QwenTray", @"D:\wsl\QwenTray", @"D:\backups\distro.tar").Arguments);
+
+        // A bundle on a USB drive or in a user's folder usually has a space in it, and that path has to
+        // arrive as one argument rather than several.
+        Assert.Equal(
+            "--export QwenTray \"E:\\My Backups\\distro.tar\"",
+            WslDistro.ExportInvocation("QwenTray", @"E:\My Backups\distro.tar").Arguments);
     }
 
     [Fact]

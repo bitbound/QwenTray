@@ -1,14 +1,11 @@
 using Avalonia;
 using Bitbound.SystemAbstractions;
-using Bitbound.SystemAbstractions.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QwenTray.Services;
 using QwenTray.Updates;
 using QwenTray.ViewModels;
 using QwenTray.Views;
-using System.Net.Http;
-using System.Threading;
 
 namespace QwenTray;
 
@@ -104,6 +101,8 @@ internal static class Program
         services.AddSingleton<WslDistroProvisioner>();
         services.AddSingleton<IdentityService>();
         services.AddSingleton<WslConfigSyncService>();
+        services.AddSingleton<BackupBundle>();
+        services.AddSingleton<DistroBackupService>();
         services.AddSingleton<DevToolInstaller>();
         services.AddSingleton<RegistryAutostartService>();
         services.AddSingleton<DaemonSupervisor>();

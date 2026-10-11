@@ -24,6 +24,15 @@ public interface IWslDistro
     /// <summary>Removes the distro and its entire filesystem. This cannot be undone.</summary>
     Task<WslCommandResult> UnregisterAsync(string distro, CancellationToken cancellationToken);
 
+    /// <summary>Writes the distro's whole filesystem to a tar file. Terminate the distro first.</summary>
+    Task<WslCommandResult> ExportAsync(string distro, string tarPath, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Registers a tar written by <see cref="ExportAsync"/> as <paramref name="distro"/>. Nothing is
+    /// imported unless the name is free, and a location that already exists has to be empty.
+    /// </summary>
+    Task<WslCommandResult> ImportAsync(string distro, string targetDirectory, string tarPath, CancellationToken cancellationToken);
+
     /// <summary>Starts the daemon as the given Linux user and returns the wsl.exe host process.</summary>
     IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile);
 }
@@ -89,6 +98,12 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
     public async Task<WslCommandResult> UnregisterAsync(string distro, CancellationToken cancellationToken)
         => await ExecuteAsync(UnregisterInvocation(distro), input: null, cancellationToken);
 
+    public async Task<WslCommandResult> ExportAsync(string distro, string tarPath, CancellationToken cancellationToken)
+        => await ExecuteAsync(ExportInvocation(distro, tarPath), input: null, cancellationToken);
+
+    public async Task<WslCommandResult> ImportAsync(string distro, string targetDirectory, string tarPath, CancellationToken cancellationToken)
+        => await ExecuteAsync(ImportInvocation(distro, targetDirectory, tarPath), input: null, cancellationToken);
+
     public IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile)
     {
         var invocation = DaemonInvocation(settings, distro, profile);
@@ -144,6 +159,14 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
 
     internal static WslInvocation UnregisterInvocation(string distro)
         => new(BuildArguments(["--unregister", distro]), WslOutputEncoding);
+
+    internal static WslInvocation ExportInvocation(string distro, string tarPath)
+        => new(BuildArguments(["--export", distro, tarPath]), WslOutputEncoding);
+
+    // The version is named rather than left to the default, because a host whose default is WSL 1 would
+    // otherwise register a filesystem image it cannot boot the way QwenTray needs it.
+    internal static WslInvocation ImportInvocation(string distro, string targetDirectory, string tarPath)
+        => new(BuildArguments(["--import", distro, targetDirectory, tarPath, "--version", "2"]), WslOutputEncoding);
 
     /// <summary>A command run inside the distro. Its stdout is the child's, so it is UTF-8.</summary>
     internal static WslInvocation ScriptInvocation(string distro, string user, string script)

@@ -162,6 +162,49 @@ public sealed class Settings
         LinuxUser = "qwen",
         WorkspaceDirectory = "/home/qwen/workspace",
     };
+
+    private static readonly Regex DistroNamePattern = new("^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Whether a name can be handed to wsl.exe as a distro name. Arguments are quoted only where they
+    /// carry whitespace, so a name holding an ampersand or starting with a dash would arrive as a new
+    /// option rather than a value.
+    /// </summary>
+    internal static bool IsSafeDistroName(string? name) => name is not null && DistroNamePattern.IsMatch(name);
+
+    /// <summary>
+    /// Replaces every value on this instance with the ones from <paramref name="other"/>. The container
+    /// hands out one Settings that the supervisor and the Settings page already hold, so an import writes
+    /// through the existing instance instead of swapping it. A new setting belongs here too.
+    /// </summary>
+    public void CopyFrom(Settings other)
+    {
+        WslDistroName = other.WslDistroName;
+        ActiveProfileId = other.ActiveProfileId;
+        Profiles = other.Profiles;
+        Host = other.Host;
+        Port = other.Port;
+        ExtraArgs = other.ExtraArgs;
+        HealthPollSeconds = other.HealthPollSeconds;
+        AutoRestart = other.AutoRestart;
+        MaxBackoffSeconds = other.MaxBackoffSeconds;
+        CheckForUpdates = other.CheckForUpdates;
+        LastUpdateCheckUtc = other.LastUpdateCheckUtc;
+        Token = other.Token;
+        RequireAuth = other.RequireAuth;
+        EnableSessionShell = other.EnableSessionShell;
+        ServeWeb = other.ServeWeb;
+        LocalControl = other.LocalControl;
+        AllowedOrigins = other.AllowedOrigins;
+        TlsCertPath = other.TlsCertPath;
+        TlsKeyPath = other.TlsKeyPath;
+        MaxSessions = other.MaxSessions;
+        MaxConnections = other.MaxConnections;
+        EventRingSize = other.EventRingSize;
+        RateLimit = other.RateLimit;
+        DebugMode = other.DebugMode;
+        SyncPaths = other.SyncPaths;
+    }
 }
 
 public sealed class SettingsStore(IFileSystem fileSystem)
@@ -279,4 +322,5 @@ internal static class SettingsCipher
 
 [System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [System.Text.Json.Serialization.JsonSerializable(typeof(Settings))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(QwenTray.Services.BackupManifest))]
 public partial class QwenTrayJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

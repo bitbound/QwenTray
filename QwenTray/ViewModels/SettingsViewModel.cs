@@ -1,6 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input.Platform;
@@ -17,8 +15,6 @@ namespace QwenTray.ViewModels;
 
 public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 {
-    private static readonly Regex DistroName = new("^[A-Za-z0-9][A-Za-z0-9_.-]*$", RegexOptions.Compiled);
-
     private readonly Settings _settings;
     private readonly SettingsStore _settingsStore;
     private readonly DaemonSupervisor _supervisor;
@@ -29,6 +25,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     private readonly IdentityService _identity;
     private readonly WslConfigSyncService _sync;
     private readonly DevToolInstaller _devTools;
+    private readonly DistroBackupService _backup;
     private readonly IProcessManager _processes;
     private readonly IUpdateService _updates;
     private readonly ISnackbarService _snackbars;
@@ -114,6 +111,23 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     [NotifyPropertyChangedFor(nameof(SetupDistroLabel))]
     [NotifyPropertyChangedFor(nameof(SetupDistroHelp))]
     private string? _distroProgress;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanExportBundle))]
+    [NotifyPropertyChangedFor(nameof(CanImportBundle))]
+    private string _bundlePath = string.Empty;
+
+    // A backup works the distro from the outside, so nothing that writes into it may run alongside.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSetupDistro))]
+    [NotifyPropertyChangedFor(nameof(CanRebuildDistro))]
+    [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
+    [NotifyPropertyChangedFor(nameof(CanExportBundle))]
+    [NotifyPropertyChangedFor(nameof(CanImportBundle))]
+    private bool _isBackupBusy;
+
+    [ObservableProperty]
+    private string? _backupProgress;
 
     [ObservableProperty]
     private string _qwenVersion = "Unknown";
@@ -278,6 +292,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         IdentityService identity,
         WslConfigSyncService sync,
         DevToolInstaller devTools,
+        DistroBackupService backup,
         IProcessManager processes,
         IUpdateService updates,
         ISnackbarService snackbars,
@@ -294,6 +309,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _identity = identity;
         _sync = sync;
         _devTools = devTools;
+        _backup = backup;
         _processes = processes;
         _updates = updates;
         _snackbars = snackbars;
@@ -303,7 +319,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
         foreach (var tool in DevToolInstaller.Catalog)
         {
-            DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy));
+            DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy && !IsBackupBusy));
         }
     }
 
@@ -317,11 +333,15 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
 
     public bool DistroNeedsAttention => HasCheckedDistro && !IsDistroProvisioned && !IsDistroBusy;
 
-    public bool CanSetupDistro => !IsDistroBusy;
+    public bool CanSetupDistro => !IsDistroBusy && !IsBackupBusy;
 
-    public bool CanRebuildDistro => DistroExists && !IsDistroBusy;
+    public bool CanRebuildDistro => DistroExists && !IsDistroBusy && !IsBackupBusy;
 
-    public bool CanDeleteDistro => DistroExists && !IsDistroBusy;
+    public bool CanDeleteDistro => DistroExists && !IsDistroBusy && !IsBackupBusy;
+
+    public bool CanExportBundle => DistroExists && !IsDistroBusy && !IsBackupBusy;
+
+    public bool CanImportBundle => !IsDistroBusy && !IsBackupBusy && !string.IsNullOrWhiteSpace(BundlePath);
 
     public bool HasIdentityKeys => HasSshPublicKey || HasGpgPublicKey;
 
@@ -362,6 +382,8 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     protected override Task OnInitializeAsync()
     {
         WslDistroName = _settings.WslDistroName;
+        // A typed path survives a revisit, while a first visit gets somewhere sensible to write to.
+        if (string.IsNullOrWhiteSpace(BundlePath)) BundlePath = DistroBackupService.DefaultBundlePath();
         LoadProfiles();
         QwenExecutable = _settings.ResolveActiveProfile().ResolvedQwenExecutable;
         Host = _settings.Host;
@@ -693,6 +715,101 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         if (_supervisor.State is DaemonState.Starting or DaemonState.Running)
         {
             await _supervisor.StopAsync();
+        }
+    }
+
+    /// <summary>
+    /// Writes the distro and this machine's settings into a bundle. Nothing is destroyed, but the distro
+    /// is stopped so its filesystem is not half-written into the archive, and it stays stopped.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportBundleAsync()
+    {
+        var path = BundlePath.Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _snackbars.Show("Set a bundle path first.", SnackbarKind.Error);
+            return;
+        }
+
+        CommitProfileEdits();
+        _settings.Profiles = [.. Profiles];
+        IsBackupBusy = true;
+        BackupProgress = "Stopping the distro and writing its filesystem into the bundle. This takes a few minutes.";
+        try
+        {
+            await StopDaemonForDistroChangeAsync();
+            var result = await _backup.ExportAsync(path, CancellationToken.None);
+            DistroStatus = $"The \"{WslDistroName.Trim()}\" distro is set up and stopped by the export.";
+            _snackbars.Show($"Wrote {DistroBackupService.FormatBytes(result.BundleBytes)} to {result.BundlePath}. It holds live credentials, so keep it somewhere private.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exporting the distro failed.");
+            _snackbars.Show($"Export failed: {ex.Message}", SnackbarKind.Error);
+        }
+        finally
+        {
+            BackupProgress = null;
+            IsBackupBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Registers the bundle's distro and adopts its settings. The bundle is read and checked before
+    /// anything is destroyed, so the prompt can name exactly what is about to be replaced.
+    /// </summary>
+    [RelayCommand]
+    private async Task ImportBundleAsync()
+    {
+        var path = BundlePath.Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _snackbars.Show("Set the bundle path first.", SnackbarKind.Error);
+            return;
+        }
+
+        BundleContents contents;
+        try
+        {
+            contents = await _backup.ProbeAsync(path, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Reading the bundle failed.");
+            _snackbars.Show($"That bundle cannot be imported: {ex.Message}", SnackbarKind.Error);
+            return;
+        }
+
+        var distro = contents.Manifest.WslDistroName;
+        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
+            $"Import the bundle made {contents.Manifest.CreatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm}?",
+            $"It registers the \"{distro}\" distro from the bundle and takes QwenTray's settings from it, including the bearer token and every profile. Settings are then protected for the Windows account on this machine.",
+            "Import",
+            $"A distro already named \"{distro}\" is unregistered first, taking its profiles' keys, GitHub sign-ins, workspaces, and Qwen configuration with it. The daemon is stopped."));
+        if (!confirmed)
+        {
+            return;
+        }
+
+        IsBackupBusy = true;
+        BackupProgress = "Unpacking the bundle and registering the distro. This takes a few minutes.";
+        try
+        {
+            await StopDaemonForDistroChangeAsync();
+            var manifest = await _backup.ImportAsync(path, CancellationToken.None);
+            await InitializeAsync();
+            _snackbars.Show($"Imported the \"{manifest.WslDistroName}\" distro. Sign in to Windows again or run 'wsl --shutdown' so the mirrored networking change takes effect.", SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Importing the bundle failed.");
+            _snackbars.Show($"Import failed: {ex.Message}", SnackbarKind.Error);
+        }
+        finally
+        {
+            BackupProgress = null;
+            IsBackupBusy = false;
         }
     }
 
@@ -1418,7 +1535,7 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
     /// <summary>Linux user names are lowercase and may not start with a digit or hyphen.</summary>
     internal static bool IsValidLinuxUser(string user) => IdentityProfile.IsValidLinuxUser(user);
 
-    internal static bool IsSafeDistroName(string name) => DistroName.IsMatch(name);
+    internal static bool IsSafeDistroName(string name) => Settings.IsSafeDistroName(name);
 
     internal static string SlugifyLinuxUser(string value)
     {
