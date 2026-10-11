@@ -16,15 +16,15 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
 {
     public static IReadOnlyList<DevTool> Catalog { get; } =
     [
+        new("browser", "Web browser", "Microsoft Edge with xdg-utils, registered as the distro's default browser.", InstallBrowser),
+        new("cli-utils", "Build tools and CLI utilities", "build-essential, jq, ripgrep, and fd.", InstallCliUtils),
         new("dotnet", ".NET SDK 10", "The current LTS .NET SDK and its runtimes.", InstallDotNet),
         new("node", "Node.js and npm", "The current Node.js LTS line, with npm.", InstallNode),
         new("azure-cli", "Azure CLI", "The az command line for working with Azure.", InstallAzureCli),
         new("aspire", "Aspire CLI", "The aspire command line.", InstallAspire),
-        new("cli-utils", "Build tools and CLI utilities", "build-essential, jq, ripgrep, and fd.", InstallCliUtils),
         new("python", "Python tooling", "python3 with venv and pip, plus the uv package manager.", InstallPython),
         new("go", "Go", "The latest Go toolchain.", InstallGo),
         new("rust", "Rust", "rustup with the stable toolchain.", InstallRust),
-        new("browser", "Web browser", "Microsoft Edge with xdg-utils, registered as the distro's default browser.", InstallBrowser),
         new("docker", "Docker Engine", "The container engine and CLI, for app hosts that run dependencies in containers.", InstallDocker),
     ];
 
