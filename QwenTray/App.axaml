@@ -39,7 +39,10 @@
             <NativeMenuItem Header="Restart" ToggleType="CheckBox" IsChecked="False" Click="OnRestart" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="Open Web Shell" ToggleType="CheckBox" IsChecked="False" Click="OnOpenWeb" />
+            <NativeMenuItem Header="Open in Windows Terminal" ToggleType="CheckBox" IsChecked="False" Click="OnOpenTerminal" />
+            <NativeMenuItem Header="Open admin shell (root)" ToggleType="CheckBox" IsChecked="False" Click="OnOpenAdminShell" />
             <NativeMenuItem Header="Open daemon log" ToggleType="CheckBox" IsChecked="False" Click="OnOpenLog" />
+            <NativeMenuItem Header="Open QwenTray folder" ToggleType="CheckBox" IsChecked="False" Click="OnOpenTrayFolder" />
             <NativeMenuItem Header="Check for updates" ToggleType="CheckBox" IsChecked="False" Click="OnCheckForUpdates" />
             <NativeMenuItem Header="Settings..." ToggleType="CheckBox" IsChecked="False" Click="OnOpenSettings" />
             <NativeMenuItemSeparator />

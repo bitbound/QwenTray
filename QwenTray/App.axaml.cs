@@ -205,6 +205,64 @@ public partial class App : Application
         _processes.Start(path, string.Empty, useShellExec: true);
     }
 
+    private void OnOpenTerminal(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        var distro = _settings.WslDistroName;
+        var profile = _settings.ResolveActiveProfile();
+        if (!Settings.IsSafeDistroName(distro) || !IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
+        {
+            _logger.LogWarning("Fix the distro name or the profile's Linux user before opening a terminal.");
+            return;
+        }
+
+        try
+        {
+            _processes.Start("wt.exe", $"wsl.exe -d {distro} -u {profile.LinuxUser}", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            // Windows Terminal is not installed everywhere, so fall back to a plain console.
+            _logger.LogDebug(ex, "Windows Terminal could not be started; falling back to wsl.exe.");
+            _processes.Start("wsl.exe", $"-d {distro} -u {profile.LinuxUser}", useShellExec: true);
+        }
+    }
+
+    private void OnOpenAdminShell(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        var distro = _settings.WslDistroName;
+        if (!Settings.IsSafeDistroName(distro))
+        {
+            _logger.LogWarning("Fix the distro name before opening an admin shell.");
+            return;
+        }
+
+        try
+        {
+            _processes.Start("wt.exe", $"wsl.exe -d {distro} -u root", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Windows Terminal could not be started; falling back to wsl.exe.");
+            _processes.Start("wsl.exe", $"-d {distro} -u root", useShellExec: true);
+        }
+    }
+
+    private void OnOpenTrayFolder(object? sender, EventArgs e)
+    {
+        ResetMenuItem(sender);
+        try
+        {
+            // The tray's own folder on the Windows host: qwentray.log and settings.json.
+            _processes.Start("explorer.exe", $"\"{SettingsStore.DirectoryPath}\"", useShellExec: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Opening the QwenTray folder failed.");
+        }
+    }
+
     private void OnOpenSettings(object? sender, EventArgs e)
     {
         ResetMenuItem(sender);
