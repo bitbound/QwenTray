@@ -456,8 +456,8 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     }
 
     /// <summary>
-    /// Installs one developer tool into the distro as root. The tools are shared by every profile, so
-    /// this does not depend on which one is selected.
+    /// Installs one developer tool into the distro. Most tools go on the shared path as root; a tool
+    /// scoped to the profile homes is installed for every profile, so any identity can use it.
     /// </summary>
     private async Task InstallToolAsync(DevTool tool)
     {
@@ -478,7 +478,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         ToolProgress = $"Installing {tool.Name} in the distro. This can take a few minutes.";
         try
         {
-            var result = await _devTools.InstallAsync(distro, tool, CancellationToken.None);
+            var result = await _devTools.InstallAsync(distro, tool, _settings.Profiles, CancellationToken.None);
             if (!result.Succeeded)
             {
                 _logger.LogWarning("Installing developer tool {Tool} reported: {Output}", tool.Id, result.Output);

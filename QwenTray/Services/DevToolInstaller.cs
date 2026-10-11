@@ -2,15 +2,25 @@ using Microsoft.Extensions.Logging;
 
 namespace QwenTray.Services;
 
+/// <summary>Where a tool's script runs and where the tool ends up.</summary>
+public enum InstallScope
+{
+    /// <summary>Runs as root and lands on the shared path, so every profile uses one copy.</summary>
+    Distro,
+
+    /// <summary>Runs as each profile's own user and lands in that user's home.</summary>
+    ProfileHome,
+}
+
 /// <summary>
 /// One developer tool the Settings page installs with a single button. The script is idempotent, so
 /// pressing the button again installs the newest version over whatever is there.
 /// </summary>
-public sealed record DevTool(string Id, string Name, string Summary, string Script);
+public sealed record DevTool(string Id, string Name, string Summary, string Script, InstallScope Scope = InstallScope.Distro);
 
 /// <summary>
-/// Installs the common developer toolchains into the QwenTray distro as root, shared by every identity
-/// profile instead of living in the per-profile homes.
+/// Installs the common developer toolchains into the QwenTray distro. Most land on the shared path as
+/// root; a tool that writes beside its own install root goes into the profile homes instead.
 /// </summary>
 public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> logger)
 {
@@ -21,17 +31,30 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
         new("dotnet", ".NET SDK 10", "The current LTS .NET SDK and its runtimes.", InstallDotNet),
         new("node", "Node.js and npm", "The current Node.js LTS line, with npm.", InstallNode),
         new("azure-cli", "Azure CLI", "The az command line for working with Azure.", InstallAzureCli),
-        new("aspire", "Aspire CLI", "The aspire command line.", InstallAspire),
+        new("aspire", "Aspire CLI", "The aspire command line.", InstallAspire, InstallScope.ProfileHome),
         new("python", "Python tooling", "python3 with venv and pip, plus the uv package manager.", InstallPython),
         new("go", "Go", "The latest Go toolchain.", InstallGo),
         new("rust", "Rust", "rustup with the stable toolchain.", InstallRust),
         new("docker", "Docker Engine", "The container engine and CLI, for app hosts that run dependencies in containers.", InstallDocker),
     ];
 
-    public async Task<WslCommandResult> InstallAsync(string distro, DevTool tool, CancellationToken cancellationToken)
+    public async Task<WslCommandResult> InstallAsync(string distro, DevTool tool, IReadOnlyList<IdentityProfile> profiles, CancellationToken cancellationToken)
     {
-        logger.LogInformation("Installing developer tool {Tool} into distro {Distro}.", tool.Id, distro);
-        return await wsl.RunRootScriptAsync(distro, tool.Script, cancellationToken);
+        logger.LogInformation("Installing developer tool {Tool} into distro {Distro} at {Scope} scope.", tool.Id, distro, tool.Scope);
+        if (tool.Scope == InstallScope.Distro)
+        {
+            return await wsl.RunRootScriptAsync(distro, tool.Script, cancellationToken);
+        }
+
+        // The script installs relative to $HOME, so the same text gives every profile its own copy.
+        // The first profile to fail stops the run so the failure names itself.
+        foreach (var profile in profiles)
+        {
+            var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, tool.Script, cancellationToken);
+            if (!result.Succeeded) return result;
+        }
+
+        return new WslCommandResult(0, string.Empty);
     }
 
     // The .NET SDK is not on the Microsoft feed for this Ubuntu release; the distro's own feed carries
@@ -56,13 +79,12 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
         + "&& echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main\" > /etc/apt/sources.list.d/azure-cli.list "
         + "&& apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli";
 
-    // The script is self-contained, so Aspire does not wait on the .NET SDK button. It lands in
-    // /usr/local/bin, which is on the default path for every profile, and rerunning replaces it.
-    // The CLI writes its logs beside the install root, which is root-owned, so that directory is
-    // created writable and sticky rather than leaving every profile unable to start the CLI.
+    // The script is self-contained, so Aspire does not wait on the .NET SDK button. The CLI keeps a
+    // log directory beside wherever it was installed, so a root-owned install root makes the CLI
+    // unstartable for a profile user. Each profile installs into its own ~/.local/bin, which the
+    // login shell already puts on the path, so --skip-path keeps the installer out of shell config.
     private const string InstallAspire =
-        "curl -fsSL https://aspire.dev/install.sh | bash -s -- --install-path /usr/local/bin --skip-path "
-        + "&& install -d -m 1777 /usr/local/logs";
+        "curl -fsSL https://aspire.dev/install.sh | bash -s -- --install-path \"$HOME/.local/bin\" --skip-path";
 
     // Ubuntu ships the fd binary as fdfind, so the name people type is linked to it.
     private const string InstallCliUtils =

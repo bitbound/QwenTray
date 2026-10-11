@@ -61,11 +61,12 @@ public sealed class DevToolInstallerTests
     }
 
     [Fact]
-    public void AspireInstallsToAPathOnEveryProfilesDefaultPathWithoutTouchingProfiles()
+    public void AspireInstallsIntoTheHomeOfWhoeverRunsTheScript()
     {
         var script = Tool("aspire").Script;
-        Assert.Contains("--install-path /usr/local/bin", script, StringComparison.Ordinal);
+        Assert.Contains("--install-path \"$HOME/.local/bin\"", script, StringComparison.Ordinal);
         Assert.Contains("--skip-path", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("/usr/local", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -114,7 +115,7 @@ public sealed class DevToolInstallerTests
         var wsl = new FakeWslDistro();
         var installer = new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance);
 
-        await installer.InstallAsync("QwenTray", Tool("dotnet"), CancellationToken.None);
+        await installer.InstallAsync("QwenTray", Tool("dotnet"), [new IdentityProfile { LinuxUser = "qwen" }], CancellationToken.None);
 
         Assert.Contains(Tool("dotnet").Script, wsl.RootScripts);
         Assert.Empty(wsl.Scripts);
@@ -143,8 +144,46 @@ public sealed class DevToolInstallerTests
     }
 
     [Fact]
-    public void AspireLeavesAWritableDirectoryForTheLogsItKeepsBesideTheInstallRoot()
+    public void AspireIsScopedToTheProfileHomeBecauseItsLogsGoBesideTheInstallRoot()
     {
-        Assert.Contains("install -d -m 1777 /usr/local/logs", Tool("aspire").Script, StringComparison.Ordinal);
+        // A root-owned install root leaves the CLI unable to start its own log directory for a profile
+        // user, so this tool is the one that cannot be shared.
+        Assert.Equal(InstallScope.ProfileHome, Tool("aspire").Scope);
+        Assert.All(DevToolInstaller.Catalog.Where(tool => tool.Id != "aspire"), tool => Assert.Equal(InstallScope.Distro, tool.Scope));
+    }
+
+    [Fact]
+    public async Task AProfileHomeToolInstallsOncePerProfileAsThatProfileUser()
+    {
+        var wsl = new FakeWslDistro();
+        var installer = new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance);
+        var profiles = new[]
+        {
+            new IdentityProfile { Id = "work", Name = "Work", LinuxUser = "workuser" },
+            new IdentityProfile { Id = "home", Name = "Home", LinuxUser = "home" },
+        };
+
+        await installer.InstallAsync("QwenTray", Tool("aspire"), profiles, CancellationToken.None);
+
+        Assert.Equal(["workuser", "home"], wsl.UserScripts.Select(entry => entry.User));
+        Assert.All(wsl.UserScripts, entry => Assert.Equal(Tool("aspire").Script, entry.Script));
+        Assert.Empty(wsl.RootScripts);
+    }
+
+    [Fact]
+    public async Task AProfileHomeToolStopsAtTheFirstProfileWhoseInstallFails()
+    {
+        var wsl = new FakeWslDistro { ScriptExitCode = 1 };
+        var installer = new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance);
+        var profiles = new[]
+        {
+            new IdentityProfile { Id = "work", Name = "Work", LinuxUser = "workuser" },
+            new IdentityProfile { Id = "home", Name = "Home", LinuxUser = "home" },
+        };
+
+        var result = await installer.InstallAsync("QwenTray", Tool("aspire"), profiles, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(["workuser"], wsl.UserScripts.Select(entry => entry.User));
     }
 }
