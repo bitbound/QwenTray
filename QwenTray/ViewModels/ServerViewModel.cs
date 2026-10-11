@@ -129,6 +129,11 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         {
             if (e.PropertyName == nameof(IdentityViewModel.SelectedProfile)) ReloadQwenExecutable();
         };
+
+        // The shared save reads this page's fields even when the user never opened it, so seed them from
+        // the loaded settings at construction rather than waiting for navigation.
+        ReloadQwenExecutable();
+        SeedFieldsFromSettings();
     }
 
     public bool CanCheckQwen => !IsQwenBusy && !_environment.IsBackupBusy;
@@ -136,6 +141,14 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     protected override Task OnInitializeAsync()
     {
         ReloadQwenExecutable();
+        SeedFieldsFromSettings();
+        RefreshLocalControlPairing();
+
+        return Task.CompletedTask;
+    }
+
+    private void SeedFieldsFromSettings()
+    {
         Host = _settings.Host;
         Port = _settings.Port.ToString();
         Token = _settings.Token;
@@ -152,9 +165,6 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         RateLimit = _settings.RateLimit;
         DebugMode = _settings.DebugMode;
         ExtraArgs = string.Join(Environment.NewLine, _settings.ExtraArgs);
-        RefreshLocalControlPairing();
-
-        return Task.CompletedTask;
     }
 
     /// <summary>The active profile's executable path, which is where the page's field is stored.</summary>

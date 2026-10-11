@@ -135,6 +135,10 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         {
             DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy && !IsBackupBusy));
         }
+
+        // The shared save reads the distro name even when the user never opened this page, so the
+        // singleton has to carry the stored value from construction.
+        WslDistroName = _settings.WslDistroName;
     }
 
     public bool DistroIsChecking => !HasCheckedDistro || IsDistroBusy;

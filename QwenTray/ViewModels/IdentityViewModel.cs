@@ -119,6 +119,11 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
             OnPropertyChanged(nameof(CanManageGitHub));
             OnPropertyChanged(nameof(CanSyncConfig));
         };
+
+        // The shared save reads the profile list and the sync entries even when the user never opened
+        // this page, so the singleton has to carry them from construction.
+        LoadProfiles();
+        SyncEntries = string.Join(Environment.NewLine, EffectiveSyncPaths());
     }
 
     public bool CanManageIdentity => !IsIdentityBusy && !_environment.IsBackupBusy;

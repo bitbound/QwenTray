@@ -191,6 +191,50 @@ public sealed class SettingsSaveTests
     }
 
     [Fact]
+    public void SavingWithoutVisitingAnyOtherPageKeepsTheStoredSettings()
+    {
+        // The shared save reads every page's fields, so a page the user never opened must still carry
+        // what was loaded from settings, not the field defaults.
+        var settings = new Settings
+        {
+            WslDistroName = "MyTray",
+            Port = 8080,
+            Token = "saved-token",
+            RequireAuth = true,
+            ServeWeb = true,
+            LocalControl = true,
+            MaxSessions = 8,
+            RateLimit = true,
+            ExtraArgs = ["--verbose"],
+            SyncPaths = ["QWEN.md"],
+            AutoRestart = true,
+            CheckForUpdates = true,
+            HealthPollSeconds = 12,
+            MaxBackoffSeconds = 30,
+            Profiles = [Settings.CreateDefaultProfile()],
+            ActiveProfileId = "default",
+        };
+        var pages = new SettingsPages(settings);
+
+        Assert.Null(pages.Save.TryApplyToSettings());
+
+        Assert.Equal("MyTray", settings.WslDistroName);
+        Assert.Equal(8080, settings.Port);
+        Assert.Equal("saved-token", settings.Token);
+        Assert.True(settings.RequireAuth);
+        Assert.True(settings.ServeWeb);
+        Assert.True(settings.LocalControl);
+        Assert.Equal(8, settings.MaxSessions);
+        Assert.True(settings.RateLimit);
+        Assert.Equal(["--verbose"], settings.ExtraArgs);
+        Assert.Equal(["QWEN.md"], settings.SyncPaths);
+        Assert.True(settings.AutoRestart);
+        Assert.True(settings.CheckForUpdates);
+        Assert.Equal(12, settings.HealthPollSeconds);
+        Assert.Equal(30, settings.MaxBackoffSeconds);
+    }
+
+    [Fact]
     public async Task TheHealthPollIsClampedToTheRangeTheTrayUses()
     {
         var pages = new SettingsPages();

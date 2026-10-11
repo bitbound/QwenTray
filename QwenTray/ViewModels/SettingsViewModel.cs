@@ -72,6 +72,14 @@ public sealed partial class SettingsViewModel : ViewModelBase<SettingsView>
         _snackbars = snackbars;
         _save = save;
         _logger = logger;
+
+        // The shared save reads these fields even when the user never opened this page, so seed them
+        // from the loaded settings and the registry at construction rather than waiting for navigation.
+        HealthPollSeconds = _settings.HealthPollSeconds.ToString();
+        AutoRestart = _settings.AutoRestart;
+        CheckForUpdates = _settings.CheckForUpdates;
+        MaxBackoffSeconds = _settings.MaxBackoffSeconds.ToString();
+        StartOnLogin = _autostart.IsEnabled();
     }
 
     public string SettingsFilePath => SettingsStore.FilePath;
