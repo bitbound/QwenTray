@@ -339,6 +339,46 @@ public sealed class DaemonOutlivesTrayTests
         Assert.Contains(wsl.Scripts, script => script.Contains("systemctl --user restart", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task SwitchingProfilesStandsThePreviousProfileAsideBeforeChoosingAPath()
+    {
+        // The profile being switched away from keeps its unit enabled and keeps answering the port, so
+        // asking systemd or the port first makes the switch look like this profile is already serving.
+        // Two enabled units then compete for one port at the next boot, and the switch never completes.
+        var wsl = new FakeWslDistro { ScriptOutput = "inactive\n\n" };
+        var settings = new Settings { Profiles = [Profile("qwen"), Profile("dev")], ActiveProfileId = "qwen" };
+
+        await WithServingPortAsync(async port =>
+        {
+            settings.Port = port;
+            var supervisor = new DaemonSupervisor(settings, wsl, new SystemdUserService(wsl));
+
+            await supervisor.StartAsync();
+
+            var stoodAside = wsl.UserScripts.FindIndex(entry => entry.User == "dev" && entry.Script.Contains("disable --now", StringComparison.Ordinal));
+            var askedState = wsl.UserScripts.FindIndex(entry => entry.Script.Contains("ActiveState", StringComparison.Ordinal));
+            Assert.True(stoodAside >= 0, "the profile being switched away from was never stopped");
+            Assert.True(stoodAside < askedState, "the previous profile was still serving while this profile's state was read");
+        });
+    }
+
+    [Fact]
+    public async Task StopStandsTheOtherProfilesUnitsAsideToo()
+    {
+        // A stopped tray has to mean nothing is serving. Disabling only the active profile's unit would
+        // leave the previous profile answering the port while the tray reports Stopped, and the poll
+        // returns early on Stopped so it would never be noticed.
+        var wsl = new FakeWslDistro { ScriptOutput = "inactive\n\n" };
+        var settings = new Settings { Profiles = [Profile("qwen"), Profile("dev")], ActiveProfileId = "qwen" };
+        var supervisor = new DaemonSupervisor(settings, wsl, new SystemdUserService(wsl));
+
+        await supervisor.StopAsync();
+
+        Assert.Contains(wsl.UserScripts, entry => entry.User == "dev" && entry.Script.Contains("disable --now", StringComparison.Ordinal));
+    }
+
+    private static IdentityProfile Profile(string linuxUser) => new() { Id = linuxUser, Name = linuxUser, LinuxUser = linuxUser };
+
     /// <summary>A port nothing can be listening on, so health always fails.</summary>
     private static int UnusedPort()
     {

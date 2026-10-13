@@ -80,12 +80,14 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
         => "#!/bin/bash\n" + WslDistro.BuildDaemonScript(serveArguments) + "\n";
 
     /// <summary>
-    /// Writes the token file from the process's own stdin, so the value never appears on any command line.
-    /// The umask is what makes the file unreadable by anything but the profile user.
+    /// Writes the token file from stdin, so the value never reaches a command line. <c>install</c> sets the
+    /// mode rather than a umask, because a umask is ignored when a redirection truncates an existing file.
     /// </summary>
     internal static string BuildEnvironmentWriteScript(IdentityProfile profile)
-        => $"umask 077 && mkdir -p -- {WslDistro.QuotePosix($"{profile.HomeDirectory}/.config/qwen")}"
-         + $" && cat > {WslDistro.QuotePosix($"{profile.HomeDirectory}/{EnvironmentRelativePath}")}";
+    {
+        var quoted = WslDistro.QuotePosix($"{profile.HomeDirectory}/{EnvironmentRelativePath}");
+        return $"install -m '0600' -D /dev/null -- {quoted} && cat > {quoted}";
+    }
 
     /// <summary>
     /// Removes the token file. Turning auth off has to delete the old secret rather than leave it where

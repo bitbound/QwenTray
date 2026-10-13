@@ -279,6 +279,13 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             return;
         }
 
+        // Only one profile's daemon can hold the port, so every other profile's unit is stood aside before
+        // anything is decided. Reading the state or the port first would mistake the previous profile still
+        // serving for this profile already running, which would leave both units enabled and competing at
+        // the next boot and would silently leave the switch unfinished. This also runs in Stop, since a
+        // stopped tray has to mean no profile is serving.
+        await _unit.StandAsideOtherProfilesAsync(_settings.WslDistroName, profile, _settings.Profiles, _shutdown.Token);
+
         // Then systemd, before the port. Something answering the health port is no proof that the process
         // behind it is this profile's unit, and now that the daemon outlives the tray this is the ordinary
         // first question rather than the unusual one.
@@ -345,7 +352,6 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         try
         {
             await _unit.EnsureLingerAsync(_settings.WslDistroName, profile, _shutdown.Token);
-            await _unit.StandAsideOtherProfilesAsync(_settings.WslDistroName, profile, _settings.Profiles, _shutdown.Token);
             var configured = await _unit.ConfigureAsync(_settings, _settings.WslDistroName, profile, _shutdown.Token);
             var started = configured && await _unit.RestartAsync(_settings.WslDistroName, profile, _shutdown.Token);
             if (!started)
@@ -382,6 +388,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         IsDaemonManaged = true;
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        // Stopping the active profile's unit is not enough to mean stopped. Whichever profile the user
+        // switched away from is still enabled and serving, so it is stood aside on the same terms as start.
+        await _unit.StandAsideOtherProfilesAsync(_settings.WslDistroName, _settings.ResolveActiveProfile(), _settings.Profiles, timeout.Token);
         await _unit.StopAsync(_settings.WslDistroName, _settings.ResolveActiveProfile(), timeout.Token);
 
         SetLocalControlPairingUrl(null);

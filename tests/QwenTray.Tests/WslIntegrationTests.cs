@@ -162,7 +162,7 @@ public sealed class WslCommandTests
 
         // The value is what the script's stdin carries. Naming the file and the mode is all the script
         // itself can say about it.
-        Assert.Contains("umask 077", script, StringComparison.Ordinal);
+        Assert.Contains("install -m '0600' -D /dev/null -- '/home/qwen/.config/qwen/serve.env'", script, StringComparison.Ordinal);
         Assert.Contains("cat > '/home/qwen/.config/qwen/serve.env'", script, StringComparison.Ordinal);
         Assert.DoesNotContain("sekret", script, StringComparison.Ordinal);
     }

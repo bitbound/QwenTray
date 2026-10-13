@@ -2,7 +2,7 @@
 
 QwenTray is a Windows tray app that supervises a single local Qwen Code daemon. The daemon does not
 run on Windows. QwenTray creates a WSL2 Ubuntu distro, owns it, and runs the daemon inside it as a
-Linux user, under a systemd user service of that user's. The tray icon and the app window drive the
+Linux user, under a systemd user service for that user. The tray icon and the app window drive the
 same daemon, and Settings covers the Linux environment, identity profiles, credentials, configuration
 sync, the daemon, and optional Local Control device pairing.
 
