@@ -234,7 +234,7 @@ public sealed class ImportedSettingsTests
         }
     }
 
-    [Fact]
+    [WindowsFact]
     public void TheBearerTokenIsProtectedOnThisMachineAndNotCarriedAsABlob()
     {
         // A DPAPI blob only opens for the account that wrote it, which is the whole reason a bundle holds
