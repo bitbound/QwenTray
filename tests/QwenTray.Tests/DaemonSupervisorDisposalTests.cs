@@ -13,6 +13,9 @@ internal sealed class FakeWslDistro : IWslDistro
 
     public List<(string User, string Script)> UserScripts { get; } = [];
 
+    /// <summary>Stdin handed to each script, so a caller can prove a secret travelled that way.</summary>
+    public List<(string Script, string Input)> ScriptInputs { get; } = [];
+
     public List<string> UnregisteredDistros { get; } = [];
 
     public List<string> TerminatedDistros { get; } = [];
@@ -22,7 +25,7 @@ internal sealed class FakeWslDistro : IWslDistro
     public List<(string Distro, string TargetDirectory, string TarPath)> Imports { get; } = [];
 
     /// <summary>How many times a caller tried to boot the distro through this double.</summary>
-    public int StartDaemonCalls { get; private set; }
+    public int RunScriptCalls { get; private set; }
 
     public int ImportExitCode { get; set; }
 
@@ -38,6 +41,7 @@ internal sealed class FakeWslDistro : IWslDistro
 
     public Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken)
     {
+        RunScriptCalls++;
         Scripts.Add(script);
         UserScripts.Add((user, script));
         return Task.FromResult(new WslCommandResult(ScriptExitCode, ScriptOutput));
@@ -45,7 +49,9 @@ internal sealed class FakeWslDistro : IWslDistro
 
     public Task<WslCommandResult> RunScriptWithInputAsync(string distro, string user, string script, string input, CancellationToken cancellationToken)
     {
+        RunScriptCalls++;
         Scripts.Add(script);
+        ScriptInputs.Add((script, input));
         return Task.FromResult(new WslCommandResult(0, string.Empty));
     }
 
@@ -81,12 +87,6 @@ internal sealed class FakeWslDistro : IWslDistro
         Imports.Add((distro, targetDirectory, tarPath));
         return Task.FromResult(new WslCommandResult(ImportExitCode, ImportExitCode == 0 ? string.Empty : "The distribution name already exists."));
     }
-
-    public IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile)
-    {
-        StartDaemonCalls++;
-        throw new NotSupportedException("These tests never start a daemon.");
-    }
 }
 
 // The ServiceProvider in Program.Main is the sole disposer of the supervisor singleton. These
@@ -94,7 +94,11 @@ internal sealed class FakeWslDistro : IWslDistro
 // disposed shutdown token source.
 public sealed class DaemonSupervisorDisposalTests
 {
-    private static DaemonSupervisor CreateSupervisor() => new(new Settings { AutoRestart = false }, new FakeWslDistro());
+    internal static DaemonSupervisor CreateSupervisor(Settings? settings = null, FakeWslDistro? wsl = null)
+    {
+        var distro = wsl ?? new FakeWslDistro();
+        return new DaemonSupervisor(settings ?? new Settings { AutoRestart = false }, distro, new SystemdUserService(distro, null!));
+    }
 
     [Fact]
     public async Task DisposingTwiceDoesNotThrow()

@@ -27,7 +27,7 @@ internal sealed class SettingsPages
         var store = new SettingsStore(fileSystem);
         var autostart = new RegistryAutostartService(new FakeRegistry());
         var provisioner = new WslDistroProvisioner(wsl, fileSystem, null!, NullLogger<WslDistroProvisioner>.Instance);
-        var supervisor = new DaemonSupervisor(Settings, wsl);
+        var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
         Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
         Environment = new EnvironmentViewModel(

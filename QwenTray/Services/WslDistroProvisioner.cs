@@ -214,9 +214,13 @@ public sealed class WslDistroProvisioner(
     // Docker access is a group membership, and a profile created after the engine has been installed
     // still needs it. Creating the group here is harmless, and the engine's postinst keeps whatever
     // members it finds.
+    //
+    // Lingering is what lets the profile's systemd user manager run with no login session holding it up,
+    // which is the only way the daemon unit can come back on a boot nobody has logged into.
     internal static string BuildCreateUserScript(IdentityProfile profile) =>
         $"id -u {profile.LinuxUser} >/dev/null 2>&1 || useradd -m -s /bin/bash {profile.LinuxUser} "
-        + $"&& groupadd -f docker && usermod -aG docker {profile.LinuxUser}";
+        + $"&& groupadd -f docker && usermod -aG docker {profile.LinuxUser} "
+        + $"&& loginctl enable-linger {profile.LinuxUser}";
 
     internal static string BuildInstallQwenScript(IdentityProfile profile) =>
         $"sudo -u {profile.LinuxUser} -H bash -lc '{QwenInstallCommand} && mkdir -p {profile.ResolvedWorkspaceDirectory}'";

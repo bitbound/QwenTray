@@ -101,7 +101,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
             _logger.LogInformation("Start with Windows {State}.", settingsPage.StartOnLogin ? "enabled" : "disabled");
         }
 
-        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl}.", DaemonSupervisor.BuildArguments(_settings, _settings.WslDistroName, _settings.ResolveActiveProfile()).Count, _settings.LocalControl);
+        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl}.", DaemonSupervisor.BuildServeArguments(_settings, _settings.ResolveActiveProfile()).Count, _settings.LocalControl);
 
         var warnings = DaemonSupervisor.ValidateSettings(_settings).ToList();
         foreach (var warning in warnings)

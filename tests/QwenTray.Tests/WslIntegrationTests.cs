@@ -24,7 +24,6 @@ public sealed class WslCommandTests
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ExportInvocation("D", "t").Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ImportInvocation("D", "l", "t").Encoding.CodePage);
         Assert.Equal(Encoding.UTF8.CodePage, WslDistro.ScriptInvocation("D", "u", "s").Encoding.CodePage);
-        Assert.Equal(Encoding.UTF8.CodePage, WslDistro.DaemonInvocation(new Settings(), "D", Settings.CreateDefaultProfile()).Encoding.CodePage);
     }
 
     [Fact]
@@ -127,26 +126,14 @@ public sealed class WslCommandTests
     }
 
     [Fact]
-    public void SplittingTheServeArgumentsKeepsTheSpawnCommandLineIdentical()
+    public void TheLauncherScriptRunsTheDaemonWithStderrFoldedIntoStdout()
     {
-        var settings = new Settings { Port = 4170 };
-        var profile = Settings.CreateDefaultProfile();
-        var composed = DaemonSupervisor.BuildArguments(settings, "QwenTray", profile);
-        var expected = new List<string> { "-d", "QwenTray", "-u", "qwen", "-e" };
-        expected.AddRange(DaemonSupervisor.BuildServeArguments(settings, profile));
-        Assert.Equal(expected, composed);
-    }
-
-    [Fact]
-    public void TheDaemonRunsThroughBashWithStderrFoldedIntoStdout()
-    {
-        // The startup banner that names the log file is written to stderr, so the daemon's stderr has to
-        // land in the one stream the supervisor reads.
-        var command = WslDistro.BuildDaemonCommand("QwenTray", "qwen", DaemonSupervisor.BuildServeArguments(new Settings { Port = 4170 }, Settings.CreateDefaultProfile()));
-        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/bin/bash", "-lc"], command.Take(7));
-        var script = command[7];
-        Assert.StartsWith("exec '/home/qwen/.local/bin/qwen' 'serve' '--hostname' '127.0.0.1' '--port' '4170' '--workspace' '/home/qwen/workspace'", script, StringComparison.Ordinal);
-        Assert.EndsWith("' 2>&1", script, StringComparison.Ordinal);
+        // The tray no longer reads the daemon's streams itself, but the launcher keeps the same shape the
+        // spawn path used, so one journal stream carries everything the daemon writes.
+        var content = SystemdUserService.BuildLauncherContent(DaemonSupervisor.BuildServeArguments(new Settings { Port = 4170 }, Settings.CreateDefaultProfile()));
+        Assert.StartsWith("#!/bin/bash\n", content, StringComparison.Ordinal);
+        Assert.Contains("exec '/home/qwen/.local/bin/qwen' 'serve' '--hostname' '127.0.0.1' '--port' '4170' '--workspace' '/home/qwen/workspace'", content, StringComparison.Ordinal);
+        Assert.EndsWith("' 2>&1\n", content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -168,25 +155,23 @@ public sealed class WslCommandTests
     }
 
     [Fact]
-    public void TheBearerTokenGoesIntoTheEnvironmentNotTheCommandLine()
+    public void TheBearerTokenTravelsOverStdinAndNeverOntoACmdLine()
     {
-        var startInfo = new System.Diagnostics.ProcessStartInfo(WslDistro.Executable);
-        WslDistro.ApplyServeToken(startInfo, "  sekret  ");
+        var profile = Settings.CreateDefaultProfile();
+        var script = SystemdUserService.BuildEnvironmentWriteScript(profile);
 
-        Assert.Equal("sekret", startInfo.Environment[WslDistro.ServerTokenVariable]);
-        Assert.Contains(WslDistro.ServerTokenVariable, startInfo.Environment["WSLENV"]!);
-        Assert.DoesNotContain("sekret", startInfo.Arguments);
+        // The value is what the script's stdin carries. Naming the file and the mode is all the script
+        // itself can say about it.
+        Assert.Contains("umask 077", script, StringComparison.Ordinal);
+        Assert.Contains("cat > '/home/qwen/.config/qwen/serve.env'", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("sekret", script, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ABlankTokenTouchesNothingInTheEnvironment()
+    public void TurningAuthOffRemovesTheTokenFile()
     {
-        var startInfo = new System.Diagnostics.ProcessStartInfo(WslDistro.Executable);
-        var before = startInfo.Environment.Count;
-
-        WslDistro.ApplyServeToken(startInfo, "   ");
-
-        Assert.Equal(before, startInfo.Environment.Count);
+        // Leaving the file behind would keep the old secret live for the daemon to read.
+        Assert.Equal("rm -f -- '/home/qwen/.config/qwen/serve.env'", SystemdUserService.BuildEnvironmentRemoveScript(Settings.CreateDefaultProfile()));
     }
 }
 
