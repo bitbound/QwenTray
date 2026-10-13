@@ -219,12 +219,17 @@ public sealed class WslConfigTests
     {
         const string content = "[interop]\nenabled=false\n# a 'quote' and a | pipe\n";
         var script = WslDistroProvisioner.BuildWriteFileScript("/etc/wsl.conf", content);
-        const string prefix = "printf %s ";
-        var start = script.IndexOf(prefix, StringComparison.Ordinal) + prefix.Length;
-        var end = script.IndexOf(" | base64", StringComparison.Ordinal);
-        var encoded = script[start..end];
+
+        // The payload is the single-quoted argument to printf, so it survives any shell metacharacter.
+        const string marker = "printf %s ";
+        var from = script.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        var to = script.IndexOf(" | base64", StringComparison.Ordinal);
+        var encoded = script[from..to].Trim('\'');
         Assert.Equal(content, Encoding.UTF8.GetString(Convert.FromBase64String(encoded)));
-        Assert.EndsWith("> /etc/wsl.conf", script, StringComparison.Ordinal);
+
+        // The path is quoted too, and the mode is named rather than left to whatever umask applies.
+        Assert.EndsWith("> '/etc/wsl.conf'", script, StringComparison.Ordinal);
+        Assert.Contains("install -m '0644' -D /dev/null -- '/etc/wsl.conf'", script, StringComparison.Ordinal);
     }
 
     [Fact]

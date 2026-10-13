@@ -1,4 +1,3 @@
-using System.Text;
 using Bitbound.SystemAbstractions;
 using Bitbound.SystemAbstractions.FileSystem;
 using Microsoft.Extensions.Logging;
@@ -205,11 +204,11 @@ public sealed class WslDistroProvisioner(
         """;
 
     /// <summary>
-    /// Writes a file as root by base64-encoding the content, which keeps newlines, quotes, and
-    /// pipes out of the shell command line entirely.
+    /// Writes a file as root. The content travels base64-encoded, which keeps newlines, quotes, and pipes
+    /// out of the shell command line entirely.
     /// </summary>
     internal static string BuildWriteFileScript(string path, string content)
-        => $"printf %s {Convert.ToBase64String(Encoding.UTF8.GetBytes(content))} | base64 -d > {path}";
+        => WslDistro.BuildFileWriteScript(path, content);
 
     // Docker access is a group membership, and a profile created after the engine has been installed
     // still needs it. Creating the group here is harmless, and the engine's postinst keeps whatever

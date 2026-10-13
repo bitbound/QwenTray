@@ -129,13 +129,13 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
     {
         var files = new[]
         {
-            (Path: $"{profile.HomeDirectory}/{UnitRelativePath}", Content: BuildUnitContent(profile, settings.AutoRestart), Executable: false),
-            (Path: $"{profile.HomeDirectory}/{LauncherRelativePath}", Content: BuildLauncherContent(DaemonSupervisor.BuildServeArguments(settings, profile)), Executable: true),
+            (Path: $"{profile.HomeDirectory}/{UnitRelativePath}", Content: BuildUnitContent(profile, settings.AutoRestart), Mode: "0600"),
+            (Path: $"{profile.HomeDirectory}/{LauncherRelativePath}", Content: BuildLauncherContent(DaemonSupervisor.BuildServeArguments(settings, profile)), Mode: "0700"),
         };
 
         foreach (var file in files)
         {
-            var written = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildWriteFileScript(file.Path, file.Content, file.Executable), cancellationToken);
+            var written = await wsl.RunScriptAsync(distro, profile.LinuxUser, WslDistro.BuildFileWriteScript(file.Path, file.Content, file.Mode), cancellationToken);
             if (!written.Succeeded)
             {
                 _logger.LogError("Could not write {Path} for profile {User}. {Output}", file.Path, profile.LinuxUser, written.Output);
@@ -256,18 +256,6 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
         }
 
         return true;
-    }
-
-    /// <summary>
-    /// Base64 keeps the content off the command line, and the mode is named rather than left to whatever
-    /// umask the distro's user happens to have. <c>-D</c> creates the parent directories.
-    /// </summary>
-    internal static string BuildWriteFileScript(string path, string content, bool makeExecutable)
-    {
-        var quoted = WslDistro.QuotePosix(path);
-        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(content));
-        return $"install -m {WslDistro.QuotePosix(makeExecutable ? "0700" : "0600")} -D /dev/null -- {quoted}"
-             + $" && printf %s {WslDistro.QuotePosix(encoded)} | base64 -d > {quoted}";
     }
 
     private async Task<WslCommandResult> RunUserManagerScriptAsync(string distro, IdentityProfile profile, string command, CancellationToken cancellationToken)

@@ -136,13 +136,26 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
 
     /// <summary>
     /// The daemon's command line as a shell script. Every argument is single-quoted, so nothing the
-    /// settings page holds can be read as shell syntax. This is what the systemd unit's launcher runs,
-    /// with stderr folded in so one stream carries everything the daemon writes.
+    /// settings page holds can be read as shell syntax, and stderr is folded in so one stream carries
+    /// everything the daemon writes.
     /// </summary>
     internal static string BuildDaemonScript(IReadOnlyList<string> serveArguments)
         => $"exec {string.Join(' ', serveArguments.Select(QuotePosix))} 2>&1";
 
     internal static string QuotePosix(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
+    /// <summary>
+    /// Builds a script that writes <paramref name="content"/> to a path inside the distro with an explicit
+    /// octal mode. Base64 keeps newlines, quotes, and pipes off the command line, and <c>-D</c> creates the
+    /// parent directories.
+    /// </summary>
+    internal static string BuildFileWriteScript(string path, string content, string mode = "0644")
+    {
+        var quoted = QuotePosix(path);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        return $"install -m {QuotePosix(mode)} -D /dev/null -- {quoted}"
+             + $" && printf %s {QuotePosix(encoded)} | base64 -d > {quoted}";
+    }
 
     internal static string BuildArguments(IReadOnlyList<string> arguments)
         => string.Join(' ', arguments.Select(QuoteArgument));
