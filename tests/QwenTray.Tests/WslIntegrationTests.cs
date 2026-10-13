@@ -215,6 +215,15 @@ public sealed class WslConfigTests
     }
 
     [Fact]
+    public void WslConfCarriesNoCarriageReturnsBecauseLinuxReadsIt()
+    {
+        // A raw string literal inherits the source file's line endings, and a Windows checkout writes CRLF.
+        // Measured in CI: the Windows run produced "[boot]\r\nsystemd=true", which the LF-only assertion
+        // above would not have caught on Linux. The invariant is the endings themselves, not the substrings.
+        Assert.DoesNotContain("\r", WslDistroProvisioner.BuildWslConf(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FileWriteScriptCarriesTheContentAsBase64()
     {
         const string content = "[interop]\nenabled=false\n# a 'quote' and a | pipe\n";

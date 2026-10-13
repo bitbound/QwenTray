@@ -190,6 +190,9 @@ public sealed class WslDistroProvisioner(
 
     // No [user] default here. Every QwenTray command passes -u explicitly, and naming a user that
     // does not exist yet can stop the distro from booting on the next start.
+    //
+    // A raw string literal carries the line endings of the source file, and Windows checkouts write CRLF,
+    // so the endings are named here rather than inherited. This file is read by Linux.
     internal static string BuildWslConf() =>
         """
         [boot]
@@ -201,7 +204,7 @@ public sealed class WslDistroProvisioner(
         [interop]
         enabled=false
         appendWindowsPath=false
-        """;
+        """.ReplaceLineEndings("\n");
 
     /// <summary>
     /// Writes a file as root. The content travels base64-encoded, which keeps newlines, quotes, and pipes
