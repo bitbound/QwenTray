@@ -12,13 +12,13 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $project = Join-Path $PSScriptRoot 'QwenTray/QwenTray.csproj'
-$profile = 'win-x64'
+$publishProfile = 'win-x64'
 $version = (Get-Date).ToUniversalTime().ToString('yyyy.M.d.HHmm')
 
 $publishArgs = @(
     'publish', $project
     '--configuration', 'Release'
-    "-p:PublishProfile=$profile"
+    "-p:PublishProfile=$publishProfile"
     "-p:Version=$version"
 )
 
@@ -26,7 +26,7 @@ if ($NoSign) {
     $publishArgs += '-p:EnableSigning=false'
 }
 
-Write-Host "Publishing QwenTray $version with the $profile profile."
+Write-Host "Publishing QwenTray $version with the $publishProfile profile."
 dotnet @publishArgs
 
 $output = Join-Path $env:USERPROFILE 'Apps/QwenTray.exe'
