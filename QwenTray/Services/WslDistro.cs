@@ -32,9 +32,6 @@ public interface IWslDistro
     /// imported unless the name is free, and a location that already exists has to be empty.
     /// </summary>
     Task<WslCommandResult> ImportAsync(string distro, string targetDirectory, string tarPath, CancellationToken cancellationToken);
-
-    /// <summary>Starts the daemon as the given Linux user and returns the wsl.exe host process.</summary>
-    IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile);
 }
 
 /// <summary>
@@ -104,49 +101,6 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
     public async Task<WslCommandResult> ImportAsync(string distro, string targetDirectory, string tarPath, CancellationToken cancellationToken)
         => await ExecuteAsync(ImportInvocation(distro, targetDirectory, tarPath), input: null, cancellationToken);
 
-    public IProcess StartDaemon(Settings settings, string distro, IdentityProfile profile)
-    {
-        var invocation = DaemonInvocation(settings, distro, profile);
-        var startInfo = new ProcessStartInfo(Executable)
-        {
-            Arguments = invocation.Arguments,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = invocation.Encoding,
-        };
-
-        ApplyServeToken(startInfo, settings.Token);
-
-        return processes.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {Executable}.");
-    }
-
-    /// <summary>
-    /// Hands the bearer token to the daemon through the environment instead of an argument, so it stays
-    /// off the wsl.exe command line. WSLENV is what forwards a Windows variable into the distro.
-    /// </summary>
-    internal static void ApplyServeToken(ProcessStartInfo startInfo, string? token)
-    {
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            return;
-        }
-
-        startInfo.Environment[ServerTokenVariable] = token.Trim();
-        var existing = startInfo.Environment.TryGetValue("WSLENV", out var wslenv) ? wslenv : null;
-        startInfo.Environment["WSLENV"] = MergeWslenv(existing, ServerTokenVariable);
-    }
-
-    private static string MergeWslenv(string? existing, string name)
-    {
-        if (string.IsNullOrEmpty(existing))
-        {
-            return name;
-        }
-
-        return existing.Split(':').Contains(name, StringComparer.Ordinal) ? existing : existing + ":" + name;
-    }
-
     /// <summary>A wsl.exe subcommand. wsl.exe writes its own output as UTF-16LE.</summary>
     internal static WslInvocation ListDistrosInvocation()
         => new(BuildArguments(["--list", "--quiet"]), WslOutputEncoding);
@@ -172,9 +126,6 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
     internal static WslInvocation ScriptInvocation(string distro, string user, string script)
         => new(BuildArguments(BuildScriptCommand(distro, user, script)), CommandOutputEncoding);
 
-    internal static WslInvocation DaemonInvocation(Settings settings, string distro, IdentityProfile profile)
-        => new(BuildArguments(BuildDaemonCommand(distro, profile.LinuxUser, DaemonSupervisor.BuildServeArguments(settings, profile))), CommandOutputEncoding);
-
     /// <summary>
     /// Builds a command that runs <paramref name="script"/> through bash. The <c>-e</c> flag passes
     /// the arguments verbatim; <c>--</c> re-joins them and runs them through the default shell, which
@@ -184,17 +135,27 @@ public sealed class WslDistro(IProcessManager processes) : IWslDistro
         => ["-d", distro, "-u", user, "-e", UnixProgram, "-lc", script];
 
     /// <summary>
-    /// The daemon is launched through bash with its stderr folded into stdout, because the log-path
-    /// banner it prints on startup goes to stderr and the process abstraction only surfaces stdout.
-    /// Every argument is single-quoted, so nothing the settings page holds can be read as shell syntax.
+    /// The daemon's command line as a shell script. Every argument is single-quoted, so nothing the
+    /// settings page holds can be read as shell syntax, and stderr is folded in so one stream carries
+    /// everything the daemon writes.
     /// </summary>
-    internal static IReadOnlyList<string> BuildDaemonCommand(string distro, string user, IReadOnlyList<string> serveArguments)
-        => ["-d", distro, "-u", user, "-e", UnixProgram, "-lc", BuildDaemonScript(serveArguments)];
-
     internal static string BuildDaemonScript(IReadOnlyList<string> serveArguments)
         => $"exec {string.Join(' ', serveArguments.Select(QuotePosix))} 2>&1";
 
     internal static string QuotePosix(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
+    /// <summary>
+    /// Builds a script that writes <paramref name="content"/> to a path inside the distro with an explicit
+    /// octal mode. Base64 keeps newlines, quotes, and pipes off the command line, and <c>-D</c> creates the
+    /// parent directories.
+    /// </summary>
+    internal static string BuildFileWriteScript(string path, string content, string mode = "0644")
+    {
+        var quoted = QuotePosix(path);
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        return $"install -m {QuotePosix(mode)} -D /dev/null -- {quoted}"
+             + $" && printf %s {QuotePosix(encoded)} | base64 -d > {quoted}";
+    }
 
     internal static string BuildArguments(IReadOnlyList<string> arguments)
         => string.Join(' ', arguments.Select(QuoteArgument));

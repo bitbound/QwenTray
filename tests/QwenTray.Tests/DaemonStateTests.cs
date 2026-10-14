@@ -183,11 +183,11 @@ public sealed class SettingsTests
 public sealed class DaemonArgumentsTests
 {
     [Fact]
-    public void DefaultsProduceTheWslPrefixThenTheCoreFlags()
+    public void DefaultsProduceTheLauncherThenTheCoreFlags()
     {
         var settings = new Settings();
-        var args = DaemonSupervisor.BuildArguments(settings, settings.WslDistroName, settings.ResolveActiveProfile());
-        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/home/qwen/.local/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170", "--workspace", "/home/qwen/workspace"], args);
+        var args = DaemonSupervisor.BuildServeArguments(settings, settings.ResolveActiveProfile());
+        Assert.Equal(["/home/qwen/.local/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170", "--workspace", "/home/qwen/workspace"], args);
     }
 
     [Fact]
@@ -210,7 +210,7 @@ public sealed class DaemonArgumentsTests
             DebugMode = true,
             ExtraArgs = ["--safe-mode"],
         };
-        var args = DaemonSupervisor.BuildArguments(settings, settings.WslDistroName, settings.ResolveActiveProfile());
+        var args = DaemonSupervisor.BuildServeArguments(settings, settings.ResolveActiveProfile());
         Assert.DoesNotContain("--token", args);
         Assert.DoesNotContain("tok", args);
         Assert.Contains("--require-auth", args);

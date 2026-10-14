@@ -1,4 +1,3 @@
-using System.Text;
 using Bitbound.SystemAbstractions;
 using Bitbound.SystemAbstractions.FileSystem;
 using Microsoft.Extensions.Logging;
@@ -191,6 +190,9 @@ public sealed class WslDistroProvisioner(
 
     // No [user] default here. Every QwenTray command passes -u explicitly, and naming a user that
     // does not exist yet can stop the distro from booting on the next start.
+    //
+    // A raw string literal carries the line endings of the source file, and Windows checkouts write CRLF,
+    // so the endings are named here rather than inherited. This file is read by Linux.
     internal static string BuildWslConf() =>
         """
         [boot]
@@ -202,21 +204,25 @@ public sealed class WslDistroProvisioner(
         [interop]
         enabled=false
         appendWindowsPath=false
-        """;
+        """.ReplaceLineEndings("\n");
 
     /// <summary>
-    /// Writes a file as root by base64-encoding the content, which keeps newlines, quotes, and
-    /// pipes out of the shell command line entirely.
+    /// Writes a file as root. The content travels base64-encoded, which keeps newlines, quotes, and pipes
+    /// out of the shell command line entirely.
     /// </summary>
     internal static string BuildWriteFileScript(string path, string content)
-        => $"printf %s {Convert.ToBase64String(Encoding.UTF8.GetBytes(content))} | base64 -d > {path}";
+        => WslDistro.BuildFileWriteScript(path, content);
 
     // Docker access is a group membership, and a profile created after the engine has been installed
     // still needs it. Creating the group here is harmless, and the engine's postinst keeps whatever
     // members it finds.
+    //
+    // Lingering is what lets the profile's systemd user manager run with no login session holding it up,
+    // which is the only way the daemon unit can come back on a boot nobody has logged into.
     internal static string BuildCreateUserScript(IdentityProfile profile) =>
         $"id -u {profile.LinuxUser} >/dev/null 2>&1 || useradd -m -s /bin/bash {profile.LinuxUser} "
-        + $"&& groupadd -f docker && usermod -aG docker {profile.LinuxUser}";
+        + $"&& groupadd -f docker && usermod -aG docker {profile.LinuxUser} "
+        + $"&& loginctl enable-linger {profile.LinuxUser}";
 
     internal static string BuildInstallQwenScript(IdentityProfile profile) =>
         $"sudo -u {profile.LinuxUser} -H bash -lc '{QwenInstallCommand} && mkdir -p {profile.ResolvedWorkspaceDirectory}'";

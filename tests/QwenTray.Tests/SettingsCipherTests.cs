@@ -6,7 +6,7 @@ namespace QwenTray.Tests;
 
 public sealed class SettingsCipherTests
 {
-    [Fact]
+    [WindowsFact]
     public void TheCipherRoundTripsAndHidesThePlaintext()
     {
         const string json = """{"token":"super-secret-token"}""";
@@ -17,7 +17,7 @@ public sealed class SettingsCipherTests
         Assert.Equal(json, SettingsCipher.Unprotect(encrypted));
     }
 
-    [Fact]
+    [WindowsFact]
     public void PlaintextIsRejectedSoLegacyFilesCanBeDetected()
     {
         // Load treats this exception as the signal that the file predates encryption.
