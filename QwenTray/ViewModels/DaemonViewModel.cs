@@ -238,6 +238,10 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
             UpdateCommandAvailability(_supervisor.State);
             RefreshAddresses();
             ApplyState(_supervisor.State);
+
+            // A failure that leaves the state chip reading Stopped or Crashed is exactly the case the
+            // page cannot explain on its own, so the reason the command did not get anywhere is shown.
+            if (_supervisor.LastProblem is { } problem) _snackbars.Show(problem, SnackbarKind.Error);
         }
     }
 

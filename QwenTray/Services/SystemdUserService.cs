@@ -27,6 +27,12 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
     {
         /// <summary>Nothing could be asked. Never treated as a confirmed answer.</summary>
         public static UnitState Unknown => new(false, false, false);
+
+        /// <summary>
+        /// Set when the distro answered nothing at all, which is not the same as systemd reporting no
+        /// such unit. A start path that cannot tell those apart reports the wrong thing to the user.
+        /// </summary>
+        public bool Unreachable { get; init; }
     }
 
     /// <summary>
@@ -106,7 +112,7 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
     public async Task<UnitState> ReadStateAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {
         var result = await RunUserManagerScriptAsync(distro, profile, $"systemctl --user show -p ActiveState,UnitFileState --value {UnitName}", cancellationToken);
-        if (!result.Succeeded) return UnitState.Unknown;
+        if (!result.Succeeded) return result.TimedOut ? UnitState.Unknown with { Unreachable = true } : UnitState.Unknown;
 
         // The empties are kept on purpose. A unit that does not exist has an empty second line, and
         // dropping it would make "never installed" and "installed but stopped" look identical.

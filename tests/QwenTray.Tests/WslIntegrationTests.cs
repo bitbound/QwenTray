@@ -15,6 +15,30 @@ public sealed class WslCommandTests
     }
 
     [Fact]
+    public void EveryInvocationNamesHowLongItMayTake()
+    {
+        // A wedged distro accepts the process and then answers nothing, so this bound is what turns that
+        // into a failure instead of a caller that never returns. The session commands are bounded
+        // tightly, and the ones that move a whole filesystem or install packages get the long budget so
+        // that they are not aborted mid-flight.
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.ListDistrosInvocation().Timeout);
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.TerminateInvocation("D").Timeout);
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.UnregisterInvocation("D").Timeout);
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.ScriptInvocation("D", "u", "s").Timeout);
+
+        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.InstallDistroInvocation("D").Timeout);
+        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.ExportInvocation("D", "t").Timeout);
+        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.ImportInvocation("D", "l", "t").Timeout);
+    }
+
+    [Fact]
+    public void ACallerThatKnowsItsStepTakesLongerCanSaySo()
+    {
+        var longer = TimeSpan.FromMinutes(5);
+        Assert.Equal(longer, WslDistro.ScriptInvocation("D", "u", "s", longer).Timeout);
+    }
+
+    [Fact]
     public void OutputEncodingFollowsTheInvocation()
     {
         // wsl.exe writes its own output as UTF-16LE, but passes a child command's stdout through as UTF-8.

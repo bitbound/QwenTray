@@ -35,19 +35,25 @@ internal sealed class FakeWslDistro : IWslDistro
 
     public int ScriptExitCode { get; set; }
 
+    /// <summary>
+    /// Makes every script answer look like wsl.exe was abandoned rather than answered, which is what a
+    /// distro whose Linux side is wedged produces. A real one is a failure with no exit code at all.
+    /// </summary>
+    public bool ScriptTimedOut { get; set; }
+
     public int UnregisterExitCode { get; set; }
 
     public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(true);
 
-    public Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken)
+    public Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
         RunScriptCalls++;
         Scripts.Add(script);
         UserScripts.Add((user, script));
-        return Task.FromResult(new WslCommandResult(ScriptExitCode, ScriptOutput));
+        return Task.FromResult(new WslCommandResult(ScriptTimedOut ? -1 : ScriptExitCode, ScriptOutput) { TimedOut = ScriptTimedOut });
     }
 
-    public Task<WslCommandResult> RunScriptWithInputAsync(string distro, string user, string script, string input, CancellationToken cancellationToken)
+    public Task<WslCommandResult> RunScriptWithInputAsync(string distro, string user, string script, string input, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
         RunScriptCalls++;
         Scripts.Add(script);
@@ -55,7 +61,7 @@ internal sealed class FakeWslDistro : IWslDistro
         return Task.FromResult(new WslCommandResult(0, string.Empty));
     }
 
-    public Task<WslCommandResult> RunRootScriptAsync(string distro, string script, CancellationToken cancellationToken)
+    public Task<WslCommandResult> RunRootScriptAsync(string distro, string script, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
         RootScripts.Add(script);
         return Task.FromResult(new WslCommandResult(0, string.Empty));

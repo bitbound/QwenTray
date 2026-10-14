@@ -43,14 +43,15 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
         logger.LogInformation("Installing developer tool {Tool} into distro {Distro} at {Scope} scope.", tool.Id, distro, tool.Scope);
         if (tool.Scope == InstallScope.Distro)
         {
-            return await wsl.RunRootScriptAsync(distro, tool.Script, cancellationToken);
+            // A tool install downloads a toolchain, so it gets the long budget rather than the session one.
+            return await wsl.RunRootScriptAsync(distro, tool.Script, cancellationToken, WslDistro.LongCommandTimeout);
         }
 
         // The script installs relative to $HOME, so the same text gives every profile its own copy.
         // The first profile to fail stops the run so the failure names itself.
         foreach (var profile in profiles)
         {
-            var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, tool.Script, cancellationToken);
+            var result = await wsl.RunScriptAsync(distro, profile.LinuxUser, tool.Script, cancellationToken, WslDistro.LongCommandTimeout);
             if (!result.Succeeded) return result;
         }
 

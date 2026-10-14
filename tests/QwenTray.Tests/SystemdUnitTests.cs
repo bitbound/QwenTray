@@ -159,6 +159,21 @@ public sealed class SystemdUnitTests
     }
 
     [Fact]
+    public async Task ADistroThatAnswersNothingIsReportedAsUnreachableRatherThanAsNoUnit()
+    {
+        // A distro whose Linux side is wedged and a profile that was never set up both leave systemd
+        // saying nothing, and only the first one is worth naming to the user.
+        var wsl = new FakeWslDistro { ScriptTimedOut = true };
+        var unit = new SystemdUserService(wsl);
+
+        var state = await unit.ReadStateAsync("QwenTray", Profile(), CancellationToken.None);
+
+        Assert.True(state.Unreachable);
+        Assert.False(state.Active);
+        Assert.False(state.Installed);
+    }
+
+    [Fact]
     public async Task StoppingTheUnitDisablesItSoItDoesNotComeBackOnTheNextBoot()
     {
         // A unit that is merely stopped would return the moment anything booted the distro again.
@@ -378,6 +393,40 @@ public sealed class DaemonOutlivesTrayTests
     }
 
     private static IdentityProfile Profile(string linuxUser) => new() { Id = linuxUser, Name = linuxUser, LinuxUser = linuxUser };
+
+    [Fact]
+    public async Task AWedgedDistroEndsTheStartWithAProblemInsteadOfNothingHappening()
+    {
+        // Windows keeps calling the distro Running while its Linux side answers nothing at all, so every
+        // call stalls. The start has to end somewhere the user can see, and it must not go on to write a
+        // unit into a distro it cannot reach.
+        var wsl = new FakeWslDistro { ScriptTimedOut = true };
+        var supervisor = new DaemonSupervisor(new Settings(), wsl, new SystemdUserService(wsl));
+
+        await supervisor.StartAsync();
+
+        Assert.Equal(DaemonState.Crashed, supervisor.State);
+        Assert.NotNull(supervisor.LastProblem);
+        Assert.Contains("QwenTray", supervisor.LastProblem, StringComparison.Ordinal);
+        Assert.DoesNotContain(wsl.Scripts, script => script.Contains("systemctl --user restart", StringComparison.Ordinal));
+        Assert.DoesNotContain(wsl.Scripts, script => script.Contains("systemctl --user enable", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AStartThatGetsSomewhereClearsTheLastProblem()
+    {
+        var wsl = new FakeWslDistro { ScriptTimedOut = true };
+        var supervisor = new DaemonSupervisor(new Settings(), wsl, new SystemdUserService(wsl));
+        await supervisor.StartAsync();
+        Assert.NotNull(supervisor.LastProblem);
+
+        // The next attempt finds a distro that answers, so the complaint from the last one is stale.
+        wsl.ScriptTimedOut = false;
+        wsl.ScriptOutput = "active\nenabled\n";
+        await supervisor.StartAsync();
+
+        Assert.Null(supervisor.LastProblem);
+    }
 
     /// <summary>A port nothing can be listening on, so health always fails.</summary>
     private static int UnusedPort()

@@ -51,6 +51,14 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     /// not persistent, and Stop cannot reach it.
     /// </summary>
     public bool IsDaemonManaged { get; private set; } = true;
+
+    /// <summary>
+    /// The last failure the operator has to act on, or null once a command gets somewhere. A distro
+    /// whose Linux side is wedged is what this exists for. Without it a Start that never reaches the
+    /// distro looks like it did nothing at all, and the reason is only ever in the log file.
+    /// </summary>
+    public string? LastProblem { get; private set; }
+
     public string? LocalControlPairingUrl => _localControlPairingUrl;
     public event EventHandler? LocalControlPairingUrlChanged;
 
@@ -269,6 +277,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             _shutdown = new CancellationTokenSource();
         }
         _intentionalExit = false;
+        LastProblem = null;
         var profile = _settings.ResolveActiveProfile();
 
         // The distro has to exist before anything can be asked of it, and this is the one question that
@@ -290,6 +299,17 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         // behind it is this profile's unit, and now that the daemon outlives the tray this is the ordinary
         // first question rather than the unusual one.
         var state = await _unit.ReadStateAsync(_settings.WslDistroName, profile, _shutdown.Token);
+        if (state.Unreachable)
+        {
+            // Windows keeps calling the distro Running while its Linux side answers nothing at all, and
+            // every call after this one would stall the same way. Naming it here is what keeps a Start
+            // from looking like it did nothing while the tray sits with its buttons disabled.
+            ReportProblem($"The \"{_settings.WslDistroName}\" Linux environment did not answer. It may be wedged, which restarting Windows Subsystem for Linux clears.");
+            _machine.UnexpectedExit();
+            PublishState();
+            return;
+        }
+
         var healthy = await IsHealthyAsync();
 
         if (state.Active && healthy)
@@ -383,6 +403,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _logger.LogInformation("Stop requested; state {State}.", State);
         _intentionalExit = true;
         _healthMisses = 0;
+        LastProblem = null;
         _shutdown.Cancel();
         _daemonProcessId = null;
         IsDaemonManaged = true;
@@ -628,6 +649,16 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _lastPublished = State;
         _logger.LogInformation("State {Previous} -> {State} (consecutive failures {Failures}).", previous, State, _machine.ConsecutiveFailures);
         if (!_disposed) StateChanged?.Invoke(this, State);
+    }
+
+    /// <summary>
+    /// Records a failure the operator has to act on and puts it in the log too. The page shows it once
+    /// the command returns, and the log keeps it for a command from the tray menu, where no page is open.
+    /// </summary>
+    private void ReportProblem(string problem)
+    {
+        LastProblem = problem;
+        _logger.LogError("{Problem}", problem);
     }
 
     /// <summary>

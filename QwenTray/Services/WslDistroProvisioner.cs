@@ -74,7 +74,7 @@ public sealed class WslDistroProvisioner(
     }
 
     public async Task<WslCommandResult> InstallOrUpdateQwenAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
-        => await wsl.RunScriptAsync(distro, profile.LinuxUser, QwenInstallCommand, cancellationToken);
+        => await wsl.RunScriptAsync(distro, profile.LinuxUser, QwenInstallCommand, cancellationToken, WslDistro.LongCommandTimeout);
 
     /// <summary>
     /// Removes the distro and everything inside it: every profile's ssh and signing keys, GitHub
@@ -229,7 +229,9 @@ public sealed class WslDistroProvisioner(
 
     private async Task RequireAsync(string distro, string script, CancellationToken cancellationToken)
     {
-        var result = await wsl.RunRootScriptAsync(distro, script, cancellationToken);
+        // A provisioning step reaches the package feed and the qwen installer, so it gets the long
+        // budget rather than the session one.
+        var result = await wsl.RunRootScriptAsync(distro, script, cancellationToken, WslDistro.LongCommandTimeout);
         if (!result.Succeeded) throw new InvalidOperationException($"Provisioning step failed. {result.Output}");
     }
 }
