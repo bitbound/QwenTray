@@ -2,9 +2,13 @@
 
 QwenTray is a Windows tray app that supervises a single local Qwen Code daemon. The daemon does not
 run on Windows. QwenTray creates a WSL2 Ubuntu distro, owns it, and runs the daemon inside it as a
-Linux user. The tray icon and the app window drive the same process, and Settings covers the Linux
-environment, identity profiles, credentials, configuration sync, the daemon, and optional Local
-Control device pairing.
+Linux user, under a systemd user service for that user. The tray icon and the app window drive the
+same daemon, and Settings covers the Linux environment, identity profiles, credentials, configuration
+sync, the daemon, and optional Local Control device pairing.
+
+The daemon belongs to systemd rather than to the tray, so it keeps serving when QwenTray exits,
+crashes, or is updated, and it comes back on its own when the distro starts. **Stop** is what takes it
+down: stopping disables the service, so it stays down until you start it again.
 
 ## Requirements
 
@@ -29,8 +33,8 @@ find Linux environment, and press **Set up distro**. That does the following:
    the distro so those settings take effect. `wsl.conf` is read at boot, so the isolation is not in
    force until that stop.
 4. Installs git, gh, sudo, openssh-client, curl, and ca-certificates.
-5. Creates each profile's Linux user, installs qwen under that user's home, and creates its workspace
-   directory.
+5. Creates each profile's Linux user, enables lingering for it so its systemd user service can run
+   with nobody logged in, installs qwen under that user's home, and creates its workspace directory.
 
 It takes a few minutes on the first run. Afterwards, sign in to Windows again or run `wsl --shutdown`
 so the networking change applies. That stops every WSL distro, not just this one.
@@ -43,8 +47,10 @@ Terminal** opens the distro as the active profile's Linux user.
 A profile is a Linux user in the distro. That user's home holds everything that makes it a distinct
 identity: the ssh key, the GPG signing key, the gh credentials, the git config, and the Qwen Code
 config. Select a different profile and press Save, and the daemon restarts as that user, so the
-whole identity swaps. Adding a profile only saves the definition. Press **Set up distro** again to
-create the new Linux user and install qwen into it.
+whole identity swaps. Each profile keeps its own daemon service in its own home, so starting one
+stops the others: only one of them can hold the port. Adding a profile only saves the definition.
+Press **Set up distro** again to create the new Linux user, enable lingering for it, and install qwen
+into it.
 
 The Qwen executable path on the Daemon page is a Linux path inside the distro, not a Windows one.
 Setup fills it in, and each profile has its own.

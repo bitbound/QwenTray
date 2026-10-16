@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using QwenTray.Services;
 using Xunit;
 
 namespace QwenTray.Tests;
@@ -63,15 +64,17 @@ internal sealed class FakeHealthEndpoint : IDisposable
     }
 }
 
-// A stop is not instantaneous: killing wsl.exe only ends the client, and the distro terminate that
-// follows is what takes the time. The health poll keeps ticking across that window, and it used to
-// read the cancelled probe as a health failure, publishing Starting while the daemon was leaving.
+// A stop is not instantaneous: it is a systemd call into the distro, and the health poll keeps ticking
+// across that window. The poll used to read the cancelled probe as a health failure, publishing
+// Starting while the daemon was leaving.
 public sealed class DaemonSupervisorStopTests
 {
     private static (DaemonSupervisor Supervisor, FakeWslDistro Wsl) CreateRunning(FakeHealthEndpoint endpoint)
     {
-        var wsl = new FakeWslDistro();
-        return (new DaemonSupervisor(new Settings { Port = endpoint.Port, AutoRestart = true }, wsl), wsl);
+        // An active unit behind a port that answers is what the start path adopts, which is how a test
+        // gets a Running supervisor without a daemon.
+        var wsl = new FakeWslDistro { ScriptOutput = "active\nenabled\n" };
+        return (new DaemonSupervisor(new Settings { Port = endpoint.Port, AutoRestart = true }, wsl, new SystemdUserService(wsl)), wsl);
     }
 
     [Fact]
@@ -86,7 +89,7 @@ public sealed class DaemonSupervisorStopTests
         supervisor.StateChanged += (_, state) => published.Add(state);
 
         var gate = new TaskCompletionSource();
-        wsl.TerminateGate = gate;
+        wsl.ScriptGate = gate;
         var stop = supervisor.StopAsync();
 
         await supervisor.PollAsync();
@@ -107,13 +110,13 @@ public sealed class DaemonSupervisorStopTests
         await supervisor.StartAsync();
 
         var gate = new TaskCompletionSource();
-        wsl.TerminateGate = gate;
+        wsl.ScriptGate = gate;
         var stop = supervisor.StopAsync();
 
         await supervisor.StartAsync();
 
         Assert.Equal(DaemonState.Stopping, supervisor.State);
-        Assert.Equal(0, wsl.StartDaemonCalls);
+        Assert.DoesNotContain(wsl.Scripts, script => script.Contains("systemctl --user restart", StringComparison.Ordinal));
 
         gate.SetResult();
         await stop;
@@ -121,12 +124,12 @@ public sealed class DaemonSupervisorStopTests
     }
 
     [Fact]
-    public async Task AFailedTerminateStillSettlesTheState()
+    public async Task AFailedStopStillSettlesTheState()
     {
-        using var endpoint = new FakeHealthEndpoint();
-        var wsl = new FakeWslDistro { TerminateFailure = new InvalidOperationException("wsl.exe is gone.") };
-        var supervisor = new DaemonSupervisor(new Settings { Port = endpoint.Port }, wsl);
-        await supervisor.StartAsync();
+        // A missing wsl.exe fails the unit stop the way the start path's distro calls fail. The state has
+        // to settle anyway, since nothing else clears Stopping and every command is disabled while it lasts.
+        var wsl = new FakeWslDistro { ScriptFailure = new InvalidOperationException("wsl.exe is gone.") };
+        var supervisor = new DaemonSupervisor(new Settings(), wsl, new SystemdUserService(wsl));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => supervisor.StopAsync());
 

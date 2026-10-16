@@ -15,6 +15,30 @@ public sealed class WslCommandTests
     }
 
     [Fact]
+    public void EveryInvocationNamesHowLongItMayTake()
+    {
+        // A wedged distro accepts the process and then answers nothing, so this bound is what turns that
+        // into a failure instead of a caller that never returns. The session commands are bounded
+        // tightly, and the ones that move a whole filesystem or install packages get the long budget so
+        // that they are not aborted mid-flight.
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.ListDistrosInvocation().Timeout);
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.TerminateInvocation("D").Timeout);
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.UnregisterInvocation("D").Timeout);
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.ScriptInvocation("D", "u", "s").Timeout);
+
+        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.InstallDistroInvocation("D").Timeout);
+        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.ExportInvocation("D", "t").Timeout);
+        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.ImportInvocation("D", "l", "t").Timeout);
+    }
+
+    [Fact]
+    public void ACallerThatKnowsItsStepTakesLongerCanSaySo()
+    {
+        var longer = TimeSpan.FromMinutes(5);
+        Assert.Equal(longer, WslDistro.ScriptInvocation("D", "u", "s", longer).Timeout);
+    }
+
+    [Fact]
     public void OutputEncodingFollowsTheInvocation()
     {
         // wsl.exe writes its own output as UTF-16LE, but passes a child command's stdout through as UTF-8.
@@ -24,7 +48,6 @@ public sealed class WslCommandTests
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ExportInvocation("D", "t").Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ImportInvocation("D", "l", "t").Encoding.CodePage);
         Assert.Equal(Encoding.UTF8.CodePage, WslDistro.ScriptInvocation("D", "u", "s").Encoding.CodePage);
-        Assert.Equal(Encoding.UTF8.CodePage, WslDistro.DaemonInvocation(new Settings(), "D", Settings.CreateDefaultProfile()).Encoding.CodePage);
     }
 
     [Fact]
@@ -127,26 +150,14 @@ public sealed class WslCommandTests
     }
 
     [Fact]
-    public void SplittingTheServeArgumentsKeepsTheSpawnCommandLineIdentical()
+    public void TheLauncherScriptRunsTheDaemonWithStderrFoldedIntoStdout()
     {
-        var settings = new Settings { Port = 4170 };
-        var profile = Settings.CreateDefaultProfile();
-        var composed = DaemonSupervisor.BuildArguments(settings, "QwenTray", profile);
-        var expected = new List<string> { "-d", "QwenTray", "-u", "qwen", "-e" };
-        expected.AddRange(DaemonSupervisor.BuildServeArguments(settings, profile));
-        Assert.Equal(expected, composed);
-    }
-
-    [Fact]
-    public void TheDaemonRunsThroughBashWithStderrFoldedIntoStdout()
-    {
-        // The startup banner that names the log file is written to stderr, so the daemon's stderr has to
-        // land in the one stream the supervisor reads.
-        var command = WslDistro.BuildDaemonCommand("QwenTray", "qwen", DaemonSupervisor.BuildServeArguments(new Settings { Port = 4170 }, Settings.CreateDefaultProfile()));
-        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/bin/bash", "-lc"], command.Take(7));
-        var script = command[7];
-        Assert.StartsWith("exec '/home/qwen/.local/bin/qwen' 'serve' '--hostname' '127.0.0.1' '--port' '4170' '--workspace' '/home/qwen/workspace'", script, StringComparison.Ordinal);
-        Assert.EndsWith("' 2>&1", script, StringComparison.Ordinal);
+        // The tray no longer reads the daemon's streams itself, but the launcher keeps the same shape the
+        // spawn path used, so one journal stream carries everything the daemon writes.
+        var content = SystemdUserService.BuildLauncherContent(DaemonSupervisor.BuildServeArguments(new Settings { Port = 4170 }, Settings.CreateDefaultProfile()));
+        Assert.StartsWith("#!/bin/bash\n", content, StringComparison.Ordinal);
+        Assert.Contains("exec '/home/qwen/.local/bin/qwen' 'serve' '--hostname' '127.0.0.1' '--port' '4170' '--workspace' '/home/qwen/workspace'", content, StringComparison.Ordinal);
+        Assert.EndsWith("' 2>&1\n", content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -168,25 +179,23 @@ public sealed class WslCommandTests
     }
 
     [Fact]
-    public void TheBearerTokenGoesIntoTheEnvironmentNotTheCommandLine()
+    public void TheBearerTokenTravelsOverStdinAndNeverOntoACmdLine()
     {
-        var startInfo = new System.Diagnostics.ProcessStartInfo(WslDistro.Executable);
-        WslDistro.ApplyServeToken(startInfo, "  sekret  ");
+        var profile = Settings.CreateDefaultProfile();
+        var script = SystemdUserService.BuildEnvironmentWriteScript(profile);
 
-        Assert.Equal("sekret", startInfo.Environment[WslDistro.ServerTokenVariable]);
-        Assert.Contains(WslDistro.ServerTokenVariable, startInfo.Environment["WSLENV"]!);
-        Assert.DoesNotContain("sekret", startInfo.Arguments);
+        // The value is what the script's stdin carries. Naming the file and the mode is all the script
+        // itself can say about it.
+        Assert.Contains("install -m '0600' -D /dev/null -- '/home/qwen/.config/qwen/serve.env'", script, StringComparison.Ordinal);
+        Assert.Contains("cat > '/home/qwen/.config/qwen/serve.env'", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("sekret", script, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ABlankTokenTouchesNothingInTheEnvironment()
+    public void TurningAuthOffRemovesTheTokenFile()
     {
-        var startInfo = new System.Diagnostics.ProcessStartInfo(WslDistro.Executable);
-        var before = startInfo.Environment.Count;
-
-        WslDistro.ApplyServeToken(startInfo, "   ");
-
-        Assert.Equal(before, startInfo.Environment.Count);
+        // Leaving the file behind would keep the old secret live for the daemon to read.
+        Assert.Equal("rm -f -- '/home/qwen/.config/qwen/serve.env'", SystemdUserService.BuildEnvironmentRemoveScript(Settings.CreateDefaultProfile()));
     }
 }
 
@@ -230,16 +239,30 @@ public sealed class WslConfigTests
     }
 
     [Fact]
+    public void WslConfCarriesNoCarriageReturnsBecauseLinuxReadsIt()
+    {
+        // A raw string literal inherits the source file's line endings, and a Windows checkout writes CRLF.
+        // Measured in CI: the Windows run produced "[boot]\r\nsystemd=true", which the LF-only assertion
+        // above would not have caught on Linux. The invariant is the endings themselves, not the substrings.
+        Assert.DoesNotContain("\r", WslDistroProvisioner.BuildWslConf(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void FileWriteScriptCarriesTheContentAsBase64()
     {
         const string content = "[interop]\nenabled=false\n# a 'quote' and a | pipe\n";
         var script = WslDistroProvisioner.BuildWriteFileScript("/etc/wsl.conf", content);
-        const string prefix = "printf %s ";
-        var start = script.IndexOf(prefix, StringComparison.Ordinal) + prefix.Length;
-        var end = script.IndexOf(" | base64", StringComparison.Ordinal);
-        var encoded = script[start..end];
+
+        // The payload is the single-quoted argument to printf, so it survives any shell metacharacter.
+        const string marker = "printf %s ";
+        var from = script.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        var to = script.IndexOf(" | base64", StringComparison.Ordinal);
+        var encoded = script[from..to].Trim('\'');
         Assert.Equal(content, Encoding.UTF8.GetString(Convert.FromBase64String(encoded)));
-        Assert.EndsWith("> /etc/wsl.conf", script, StringComparison.Ordinal);
+
+        // The path is quoted too, and the mode is named rather than left to whatever umask applies.
+        Assert.EndsWith("> '/etc/wsl.conf'", script, StringComparison.Ordinal);
+        Assert.Contains("install -m '0644' -D /dev/null -- '/etc/wsl.conf'", script, StringComparison.Ordinal);
     }
 
     [Fact]

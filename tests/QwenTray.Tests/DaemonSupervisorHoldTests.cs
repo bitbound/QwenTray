@@ -11,7 +11,7 @@ public sealed class DaemonSupervisorHoldTests
     private static (DaemonSupervisor Supervisor, FakeWslDistro Wsl) Create()
     {
         var wsl = new FakeWslDistro();
-        return (new DaemonSupervisor(new Settings { AutoRestart = true }, wsl), wsl);
+        return (new DaemonSupervisor(new Settings { AutoRestart = true }, wsl, new SystemdUserService(wsl)), wsl);
     }
 
     [Fact]
@@ -30,9 +30,13 @@ public sealed class DaemonSupervisorHoldTests
         var (supervisor, wsl) = Create();
 
         var hold = await supervisor.HoldAsync("exporting the bundle");
+        // Taking the hold stops the unit, which is the one distro call expected here. Everything counted
+        // from here on would be the ignored start booting the distro back up.
+        var callsAfterHold = wsl.RunScriptCalls;
         await supervisor.StartAsync();
 
-        Assert.Equal(0, wsl.StartDaemonCalls);
+        Assert.Equal(callsAfterHold, wsl.RunScriptCalls);
+        Assert.DoesNotContain(wsl.Scripts, script => script.Contains("systemctl --user restart", StringComparison.Ordinal));
         Assert.Equal(DaemonState.Stopped, supervisor.State);
         await hold.DisposeAsync();
     }

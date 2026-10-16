@@ -1,6 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
-using Bitbound.SystemAbstractions.Processes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using QwenTray.Services;
@@ -9,22 +7,23 @@ namespace QwenTray;
 
 public sealed class DaemonSupervisor : IAsyncDisposable
 {
-    // Health polls an adopted daemon may miss before it is treated as dead and restarted.
-    private const int AdoptedMissesBeforeCrash = 3;
+    // How many consecutive failed health polls end the daemon's claim to be working. systemd restarts a
+    // process that exits, so a sustained failure with the process still alive means it is wedged, which
+    // is the one case systemd cannot notice.
+    private const int HealthMissesBeforeCrash = 3;
 
-    private static readonly Regex LogPathRegex = new(@"daemon log\s*[→>\-]*\s*(.+?\.log)\s*$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private readonly Settings _settings;
     private readonly IWslDistro _wsl;
+    private readonly SystemdUserService _unit;
     private readonly ILogger<DaemonSupervisor> _logger;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
     private readonly DaemonStateMachine _machine = new();
     private readonly SemaphoreSlim _localControlGate = new(1, 1);
-    private IProcess? _process;
-    private bool _adopted;
-    private int _adoptedMisses;
+    private int _healthMisses;
     private bool _intentionalExit;
     private bool _disposed;
     private string? _logPath;
+    private int? _daemonProcessId;
     private string? _localControlPairingUrl;
     private bool _localControlRedactionLogged;
     private bool _localControlEnableAttempted;
@@ -35,22 +34,38 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     private int _holdCount;
     private string? _holdReason;
 
-    public DaemonSupervisor(Settings settings, IWslDistro wsl, ILogger<DaemonSupervisor>? logger = null)
+    public DaemonSupervisor(Settings settings, IWslDistro wsl, SystemdUserService unit, ILogger<DaemonSupervisor>? logger = null)
     {
         _settings = settings;
         _wsl = wsl;
+        _unit = unit;
         _logger = logger ?? NullLogger<DaemonSupervisor>.Instance;
     }
 
     public DaemonState State => _machine.State;
     public string? LogPath => _logPath;
+
+    /// <summary>
+    /// False while the daemon answering the port is not the unit this profile owns, which is what a stray
+    /// process left behind by an older build looks like from here. A daemon in that state is serving but
+    /// not persistent, and Stop cannot reach it.
+    /// </summary>
+    public bool IsDaemonManaged { get; private set; } = true;
+
+    /// <summary>
+    /// The last failure the operator has to act on, or null once a command gets somewhere. A distro
+    /// whose Linux side is wedged is what this exists for. Without it a Start that never reaches the
+    /// distro looks like it did nothing at all, and the reason is only ever in the log file.
+    /// </summary>
+    public string? LastProblem { get; private set; }
+
     public string? LocalControlPairingUrl => _localControlPairingUrl;
     public event EventHandler? LocalControlPairingUrlChanged;
 
     /// <summary>
-    /// Where the daemon writes its log, as a path Windows can open. The startup banner is the
-    /// authoritative answer. A daemon that was already running when the tray started has no banner, so
-    /// its conventional location is asked of the distro instead.
+    /// Where the daemon writes its log, as a path Windows can open. The systemd unit owns the daemon's
+    /// output, so the tray never sees a startup banner and the conventional location is asked of the
+    /// distro instead.
     /// </summary>
     public async Task<string?> ResolveLogPathAsync(CancellationToken cancellationToken)
     {
@@ -80,7 +95,11 @@ public sealed class DaemonSupervisor : IAsyncDisposable
                 return null;
             }
 
-            return ToUncPath(_settings.WslDistroName, WslDistro.ParseAbsolutePath(result.Output) ?? string.Empty);
+            // Cached, because the daemon prints no banner the tray can read and the answer cannot change
+            // while the profile is the same. Without this every refresh of the Daemon page costs a call.
+            var path = ToUncPath(_settings.WslDistroName, WslDistro.ParseAbsolutePath(result.Output) ?? string.Empty);
+            if (path.Length > 0) _logPath = path;
+            return path;
         }
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
         {
@@ -146,15 +165,11 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         }
     }
 
-    /// <summary>The supervised wsl.exe host process id, or nothing once it has exited.</summary>
-    public int? DaemonProcessId
-    {
-        get
-        {
-            try { return _process is { HasExited: false } process ? process.Id : null; }
-            catch (InvalidOperationException) { return null; }
-        }
-    }
+    /// <summary>
+    /// The daemon's process id inside the distro, as systemd reported it the last time the daemon was
+    /// seen healthy. The tray no longer owns the process, so this is a reading of the unit, not a handle.
+    /// </summary>
+    public int? DaemonProcessId => _daemonProcessId;
 
     public event EventHandler<DaemonState>? StateChanged;
 
@@ -190,6 +205,11 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         try
         {
             await StopAsync();
+
+            // Stopping the unit is not enough here. An export or a delete needs the whole distro down,
+            // and lingering means the user manager would bring the daemon back the moment it boots again.
+            using var termination = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await _wsl.TerminateAsync(_settings.WslDistroName, termination.Token);
         }
         catch
         {
@@ -257,56 +277,133 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             _shutdown = new CancellationTokenSource();
         }
         _intentionalExit = false;
+        LastProblem = null;
+        var profile = _settings.ResolveActiveProfile();
 
-        // A daemon already answering is adopted, which covers a distro that outlived a QwenTray restart.
-        if (await IsHealthyAsync())
+        // The distro has to exist before anything can be asked of it, and this is the one question that
+        // does not boot it, so it comes first. Everything after here starts the instance.
+        if (!await _wsl.DistroExistsAsync(_settings.WslDistroName, _shutdown.Token))
         {
-            _machine.Adopt();
-            _adopted = true;
-            _adoptedMisses = 0;
-            _logger.LogInformation("Adopting the daemon already answering on port {Port}.", _settings.Port);
+            _logger.LogInformation("Start requested with no \"{Distro}\" distro to run the daemon in.", _settings.WslDistroName);
+            return;
+        }
+
+        // Only one profile's daemon can hold the port, so every other profile's unit is stood aside before
+        // anything is decided. Reading the state or the port first would mistake the previous profile still
+        // serving for this profile already running, which would leave both units enabled and competing at
+        // the next boot and would silently leave the switch unfinished. This also runs in Stop, since a
+        // stopped tray has to mean no profile is serving.
+        await _unit.StandAsideOtherProfilesAsync(_settings.WslDistroName, profile, _settings.Profiles, _shutdown.Token);
+
+        // Then systemd, before the port. Something answering the health port is no proof that the process
+        // behind it is this profile's unit, and now that the daemon outlives the tray this is the ordinary
+        // first question rather than the unusual one.
+        var state = await _unit.ReadStateAsync(_settings.WslDistroName, profile, _shutdown.Token);
+        if (state.Unreachable)
+        {
+            // Windows keeps calling the distro Running while its Linux side answers nothing at all, and
+            // every call after this one would stall the same way. Naming it here is what keeps a Start
+            // from looking like it did nothing while the tray sits with its buttons disabled.
+            ReportProblem($"The \"{_settings.WslDistroName}\" Linux environment did not answer. It may be wedged, which restarting Windows Subsystem for Linux clears.");
+            _machine.UnexpectedExit();
             PublishState();
             return;
         }
 
-        // Everything above this line waited, so a hold taken while this start was in flight has to be
-        // re-checked before the distro is booted. Nothing between here and the spawn waits.
-        if (IsHeld)
+        var healthy = await IsHealthyAsync();
+
+        if (state.Active && healthy)
         {
-            _logger.LogInformation("A hold for {Reason} was taken while this start was checking health; the distro is not booted.", HoldReason);
+            // Our unit is up and serving, which is the whole point of the handoff: a QwenTray that
+            // restarts finds the daemon it started last time still there and leaves it alone.
+            IsDaemonManaged = true;
+            _healthMisses = 0;
+            _machine.Adopt();
+            _logger.LogInformation("The daemon unit for {User} is already serving; not starting another.", profile.LinuxUser);
+            PublishState();
+            _ = RefreshDaemonProcessIdAsync(profile, _shutdown.Token);
             return;
         }
 
-        _adopted = false;
+        if (healthy)
+        {
+            // Something holds the port and it is not this profile's unit. Adopting it quietly would report
+            // a daemon the tray cannot stop, because Stop only reaches the unit, and one that dies with the
+            // distro instead of surviving it. So keep it serving, take the next start over, and say which
+            // is which. Enabling without restarting is deliberate: a second daemon started now would fail
+            // to bind and could take the working one down with it.
+            IsDaemonManaged = false;
+            _healthMisses = 0;
+            _machine.Adopt();
+            PublishState();
+            _ = RefreshDaemonProcessIdAsync(profile, _shutdown.Token);
+
+            await _unit.EnsureLingerAsync(_settings.WslDistroName, profile, _shutdown.Token);
+            await _unit.ConfigureAsync(_settings, _settings.WslDistroName, profile, _shutdown.Token);
+            _logger.LogWarning("Port {Port} is answered by a process outside the \"{Unit}\" unit. It is running but not managed, so it will not survive a distro restart and Stop will not stop it. The unit is configured and takes over on the next start.", _settings.Port, SystemdUserService.UnitName);
+            return;
+        }
+
+        // Nothing is serving. This covers the unit never having been started and the unit systemd calls
+        // active while the daemon behind it has stopped answering, and both are fixed the same way: apply
+        // the settings and restart. Leaving the second case alone would strand it, since every retry would
+        // find the unit active and return without ever replacing the process.
+        // Everything above this line waited, so a hold taken while this start was in flight has to be
+        // re-checked before the distro is booted any further.
+        if (IsHeld)
+        {
+            _logger.LogInformation("A hold for {Reason} was taken while this start was checking the unit; the distro is not booted.", HoldReason);
+            return;
+        }
+
+        IsDaemonManaged = true;
         _machine.BeginStart();
         PublishState();
         _logPath = null;
-        var profile = _settings.ResolveActiveProfile();
-        var arguments = BuildArguments(_settings, _settings.WslDistroName, profile);
+        _daemonProcessId = null;
+        var serveArguments = BuildServeArguments(_settings, profile);
         foreach (var warning in ValidateSettings(_settings)) _logger.LogWarning("Daemon settings warning: {Warning}", warning);
         SetLocalControlPairingUrl(null);
         _localControlEnableAttempted = false;
 
+        // Writing the unit is what applies the settings, so it happens on every start rather than only
+        // the first one. Lingering is the root half of the same promise: without it the enabled unit does
+        // not start on a boot that nobody has logged into.
         try
         {
-            var process = _process = _wsl.StartDaemon(_settings, _settings.WslDistroName, profile);
-            _ = PumpOutputAsync(process, _shutdown.Token);
-            _logger.LogInformation("Spawned the daemon in distro {Distro} as {User}. Pid={Pid} ArgCount={ArgCount}", _settings.WslDistroName, profile.LinuxUser, DaemonProcessId, arguments.Count);
+            await _unit.EnsureLingerAsync(_settings.WslDistroName, profile, _shutdown.Token);
+            var configured = await _unit.ConfigureAsync(_settings, _settings.WslDistroName, profile, _shutdown.Token);
+            var started = configured && await _unit.RestartAsync(_settings.WslDistroName, profile, _shutdown.Token);
+            if (!started)
+            {
+                _logger.LogError("Could not hand the daemon to systemd in {Distro}.", _settings.WslDistroName);
+                _machine.UnexpectedExit();
+                PublishState();
+                return;
+            }
+
+            _logger.LogInformation("Handed the daemon to systemd in distro {Distro} as {User}. ArgCount={ArgCount}", _settings.WslDistroName, profile.LinuxUser, serveArguments.Count);
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to spawn the daemon in {Distro}.", _settings.WslDistroName);
+            _logger.LogError(exception, "Failed to hand the daemon to systemd in {Distro}.", _settings.WslDistroName);
             _machine.UnexpectedExit();
             PublishState();
             throw;
         }
     }
 
+    /// <summary>
+    /// Stops the unit and keeps it stopped through the next distro boot. Disabling is part of stopping: a
+    /// unit that is merely stopped would come back on its own the next time anything boots the distro,
+    /// which would undo a hold the moment the distro was touched again.
+    /// </summary>
     public async Task StopAsync()
     {
         _logger.LogInformation("Stop requested; state {State}.", State);
         _intentionalExit = true;
-        _adopted = false;
+        _healthMisses = 0;
+        LastProblem = null;
 
         // The stopping state goes up before the shutdown token is cancelled. A poll that lands in
         // between then sees a cancelled health probe, and the state it reads has to say the daemon is
@@ -314,28 +411,21 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _machine.BeginStop();
         PublishState();
         _shutdown.Cancel();
+        _daemonProcessId = null;
+        IsDaemonManaged = true;
 
-        var process = _process;
-        _process = null;
-        using var termination = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try
         {
-            if (process is not null)
-            {
-                try
-                {
-                    if (!process.HasExited) process.Kill(entireProcessTree: true);
-                }
-                catch (InvalidOperationException) { }
-            }
-
-            // Killing wsl.exe only ends the client. Terminating the distro is what guarantees the daemon
-            // is gone and that the port is free for the next profile.
-            await _wsl.TerminateAsync(_settings.WslDistroName, termination.Token);
+            // Stopping the active profile's unit is not enough to mean stopped. Whichever profile the user
+            // switched away from is still enabled and serving, so it is stood aside on the same terms as start.
+            await _unit.StandAsideOtherProfilesAsync(_settings.WslDistroName, _settings.ResolveActiveProfile(), _settings.Profiles, timeout.Token);
+            await _unit.StopAsync(_settings.WslDistroName, _settings.ResolveActiveProfile(), timeout.Token);
         }
         finally
         {
-            // Every way out of the teardown settles the state, or every command stays disabled.
+            // Every way out of the stop settles the state, or a throw leaves it at Stopping with every
+            // command disabled and no poll that would clear it.
             SetLocalControlPairingUrl(null);
             _machine.UserStopped();
             PublishState();
@@ -353,29 +443,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     public async Task PollAsync()
     {
         if (_disposed) return;
-        if (_process is { HasExited: true } process)
-        {
-            int? exitCode = null;
-            try { exitCode = process.ExitCode; }
-            catch { }
-            _process = null;
-            if (_intentionalExit || exitCode != 0) SetLocalControlPairingUrl(null);
-            if (_intentionalExit)
-            {
-                _logger.LogInformation("Daemon host exited with code {ExitCode} (intentional stop).", exitCode);
-                _machine.UserStopped();
-                PublishState();
-            }
-            else
-            {
-                _logger.LogError("Daemon host exited unexpectedly with code {ExitCode}.", exitCode);
-                HandleUnexpectedExit();
-            }
-            return;
-        }
 
-        // A Stopped supervisor owns no daemon. Adoption happens only in StartAsync, so a stray process
-        // answering the health port must not pull a stopped tray into Running here. A stop in flight is
+        // A Stopped supervisor owns no daemon, and the tray having stopped the unit means a stray
+        // process answering the health port must not pull it back into Running here. A stop in flight is
         // skipped for the same reason: it cancelled the shutdown token this probe runs under, so a
         // missing answer says nothing about the daemon.
         if (State is DaemonState.Stopped or DaemonState.Stopping) return;
@@ -383,31 +453,42 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         var healthy = await IsHealthyAsync();
         if (healthy)
         {
-            _adoptedMisses = 0;
+            var wasRunning = State == DaemonState.Running;
+            _healthMisses = 0;
             _machine.HealthSucceeded();
             PublishState();
+            // systemd answers for the process, so the id is read once when the daemon becomes healthy
+            // rather than on every poll.
+            if (!wasRunning) await RefreshDaemonProcessIdAsync(_settings.ResolveActiveProfile(), _shutdown.Token);
             await RefreshLocalControlPairingAsync(_shutdown.Token);
         }
         else if (State is DaemonState.Starting or DaemonState.Running)
         {
-            // An adopted daemon has no child process to watch, so sustained failed health is the only
-            // signal that it died. Without this the state would sit at Starting and auto-restart
-            // would never fire.
-            if (_adopted)
+            _healthMisses++;
+            if (_healthMisses >= HealthMissesBeforeCrash)
             {
-                _adoptedMisses++;
-                if (_adoptedMisses >= AdoptedMissesBeforeCrash)
-                {
-                    _adopted = false;
-                    _adoptedMisses = 0;
-                    _logger.LogError("The adopted daemon at {HealthUri} stopped responding.", _settings.HealthUri);
-                    HandleUnexpectedExit();
-                    return;
-                }
+                _healthMisses = 0;
+                _logger.LogError("The daemon at {HealthUri} stopped responding.", _settings.HealthUri);
+                _daemonProcessId = null;
+                HandleUnexpectedExit();
+                return;
             }
+
             if (State == DaemonState.Running) _logger.LogWarning("Health check FAILED at {HealthUri}; daemon stopped responding.", _settings.HealthUri);
             _machine.HealthFailed();
             PublishState();
+        }
+    }
+
+    private async Task RefreshDaemonProcessIdAsync(IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _daemonProcessId = await _unit.ReadMainPidAsync(_settings.WslDistroName, profile, cancellationToken);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or OperationCanceledException or ObjectDisposedException)
+        {
+            _logger.LogDebug(exception, "Could not read the daemon's process id from systemd.");
         }
     }
 
@@ -421,39 +502,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         catch (OperationCanceledException) { }
     }
 
-    // The process abstraction surfaces stdout only, so the daemon's stderr tail that used to be
-    // logged on a crash is gone. Reading stdout keeps the log path capture working.
-    private async Task PumpOutputAsync(IProcess process, CancellationToken cancellationToken)
-    {
-        try
-        {
-            while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
-            {
-                if (line.Length == 0) continue;
-                TryCaptureLogPath(line);
-                if (!_settings.LocalControl) _logger.LogDebug("daemon stdout: {Line}", line);
-            }
-        }
-        catch (Exception exception) when (exception is OperationCanceledException or InvalidOperationException or ObjectDisposedException)
-        {
-        }
-    }
-
-    internal static List<string> BuildArguments(Settings settings, string distro, IdentityProfile profile)
-    {
-        var args = new List<string>
-        {
-            "-d", distro,
-            "-u", profile.LinuxUser,
-            "-e",
-        };
-        args.AddRange(BuildServeArguments(settings, profile));
-        return args;
-    }
-
     /// <summary>
-    /// The qwen launcher and everything passed to it, with no wsl.exe arguments in front. This is the
-    /// list the distro runs, so anything executed inside it is quoted from here.
+    /// The qwen launcher and everything passed to it. This is the command the distro runs, both for the
+    /// systemd unit's launcher script and for anything else that has to reproduce the daemon's arguments.
     /// </summary>
     internal static List<string> BuildServeArguments(Settings settings, IdentityProfile profile)
     {
@@ -468,8 +519,8 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         // configured workspace directory would never become the workspace.
         args.Add("--workspace");
         args.Add(profile.ResolvedWorkspaceDirectory);
-        // The bearer token is passed through the environment (see WslDistro.StartDaemon) so it never
-        // appears on the shipped wsl.exe command line.
+        // The bearer token travels in the unit's environment file, never in these arguments, so it stays
+        // off every command line and out of the unit and launcher text.
         if (settings.RequireAuth) args.Add("--require-auth");
         if (settings.EnableSessionShell) args.Add("--enable-session-shell");
         if (!settings.ServeWeb) args.Add("--no-web");
@@ -583,25 +634,6 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (!_disposed) LocalControlPairingUrlChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void TryCaptureLogPath(string line)
-    {
-        if (!TryReadLogPath(line, _settings.WslDistroName, out var path)) return;
-        if (string.Equals(path, _logPath, StringComparison.Ordinal)) return;
-        _logPath = path;
-        _logger.LogInformation("Daemon reported its log file at {LogPath}.", path);
-    }
-
-    /// <summary>
-    /// Reads the log path out of the banner the daemon prints at startup. The banner is written to
-    /// stderr, so whoever spawns the daemon has to fold stderr into the stream being read here.
-    /// </summary>
-    internal static bool TryReadLogPath(string line, string distro, out string logPath)
-    {
-        var match = LogPathRegex.Match(line);
-        logPath = match.Success ? ToUncPath(distro, match.Groups[1].Value.Trim()) : string.Empty;
-        return logPath.Length > 0;
-    }
-
     /// <summary>Turns <c>/home/qwen/.qwen/daemon.log</c> into the distro share Windows can open.</summary>
     internal static string ToUncPath(string distro, string linuxPath)
     {
@@ -634,20 +666,34 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (!_disposed) StateChanged?.Invoke(this, State);
     }
 
+    /// <summary>
+    /// Records a failure the operator has to act on and puts it in the log too. The page shows it once
+    /// the command returns, and the log keeps it for a command from the tray menu, where no page is open.
+    /// </summary>
+    private void ReportProblem(string problem)
+    {
+        LastProblem = problem;
+        _logger.LogError("{Problem}", problem);
+    }
+
+    /// <summary>
+    /// Stops the tray's own work without touching the daemon. This is what makes the daemon outlive
+    /// QwenTray: the unit belongs to systemd, so exiting, a tray crash, and an update handoff that kills
+    /// the process outright all leave it serving. Stopping the daemon is only ever an explicit Stop.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
         _shutdown.Cancel();
-        // The cancel unwinds the backoff delay. Awaiting it keeps a pending restart from spawning a
-        // daemon while the app is exiting.
+        // The cancel unwinds the backoff delay. Awaiting it keeps a pending restart from handing a new
+        // daemon to systemd while the app is exiting.
         try
         {
             if (_restartTask is not null) await _restartTask;
         }
         catch (OperationCanceledException) { }
         catch (InvalidOperationException) { }
-        await StopAsync();
         SetLocalControlPairingUrl(null);
         _shutdown.Dispose();
         _http.Dispose();

@@ -70,28 +70,11 @@ public sealed class DistroLifecycleTests
 
 public sealed class DaemonLogPathTests
 {
-    // The exact line qwen serve writes, which is on stderr: process.stderr.write in the shipped bundle.
-    private const string BannerLine = "qwen serve: daemon log \u2192 /home/qwen/.qwen/debug/daemon/daemon.log";
-
-    [Fact]
-    public void TheStartupBannerYieldsADistroSharePath()
-    {
-        Assert.True(DaemonSupervisor.TryReadLogPath(BannerLine, "QwenTray", out var path));
-        Assert.Equal(@"\\wsl.localhost\QwenTray\home\qwen\.qwen\debug\daemon\daemon.log", path);
-    }
-
-    [Fact]
-    public void OtherOutputIsNotABanner()
-    {
-        Assert.False(DaemonSupervisor.TryReadLogPath("qwen serve: listening on 127.0.0.1:4170", "QwenTray", out _));
-        Assert.False(DaemonSupervisor.TryReadLogPath("qwen serve: daemon log \u2192 (disabled)", "QwenTray", out _));
-    }
-
     [Fact]
     public async Task AnAdoptedDaemonWithNoBannerIsFoundAtItsConventionalPath()
     {
         var wsl = new FakeWslDistro { ScriptOutput = "/home/qwen/.qwen/debug/daemon/daemon.log" };
-        var supervisor = new DaemonSupervisor(new Settings(), wsl);
+        var supervisor = new DaemonSupervisor(new Settings(), wsl, new SystemdUserService(wsl));
 
         var path = await supervisor.ResolveLogPathAsync(CancellationToken.None);
 
@@ -100,11 +83,26 @@ public sealed class DaemonLogPathTests
     }
 
     [Fact]
+    public async Task TheConventionalPathIsAskedForOnceAndThenRemembered()
+    {
+        // The unit owns the daemon's output, so there is no banner to read and this query is the only
+        // source. Asking again on every refresh of the page would cost a distro call each time.
+        var wsl = new FakeWslDistro { ScriptOutput = "/home/qwen/.qwen/debug/daemon/daemon.log" };
+        var supervisor = new DaemonSupervisor(new Settings(), wsl, new SystemdUserService(wsl));
+
+        var first = await supervisor.ResolveLogPathAsync(CancellationToken.None);
+        var second = await supervisor.ResolveLogPathAsync(CancellationToken.None);
+
+        Assert.Equal(first, second);
+        Assert.Equal(1, wsl.RunScriptCalls);
+    }
+
+    [Fact]
     public async Task AProfileWithoutAValidUserNameHasNoLogToFind()
     {
         var wsl = new FakeWslDistro();
         var settings = new Settings { Profiles = [new IdentityProfile { Id = "x", Name = "X", LinuxUser = "not a user" }] };
-        var supervisor = new DaemonSupervisor(settings, wsl);
+        var supervisor = new DaemonSupervisor(settings, wsl, new SystemdUserService(wsl));
 
         Assert.Null(await supervisor.ResolveLogPathAsync(CancellationToken.None));
         Assert.Empty(wsl.Scripts);

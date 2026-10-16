@@ -177,6 +177,12 @@ public partial class App : Application
         {
             await command(supervisor);
         }
+        catch (Exception exception)
+        {
+            // These handlers are async void, so an exception here would end the process rather than
+            // reach anything that could report it.
+            _logger.LogError(exception, "A daemon command from the tray menu failed.");
+        }
         finally
         {
             _daemonCommandBusy = false;
