@@ -100,6 +100,20 @@ public sealed class Settings
     public bool EnableSessionShell { get; set; }
     public bool ServeWeb { get; set; } = true;
     public bool LocalControl { get; set; }
+
+    /// <summary>
+    /// Exposes the daemon to the network through a socket-activated forwarder inside the distro, which is
+    /// what lets the daemon keep binding loopback. Off by default, because it opens the daemon to the
+    /// network.
+    /// </summary>
+    public bool LanProxy { get; set; }
+
+    /// <summary>
+    /// The port the forwarder listens on. It has to differ from <see cref="Port"/>, because the daemon
+    /// keeps its own port and the forwarder binds a second one alongside it.
+    /// </summary>
+    public int LanProxyPort { get; set; } = 4171;
+
     public string[] AllowedOrigins { get; set; } = [];
     public string TlsCertPath { get; set; } = "";
     public string TlsKeyPath { get; set; } = "";
@@ -204,6 +218,8 @@ public sealed class Settings
         EnableSessionShell = other.EnableSessionShell;
         ServeWeb = other.ServeWeb;
         LocalControl = other.LocalControl;
+        LanProxy = other.LanProxy;
+        LanProxyPort = other.LanProxyPort;
         AllowedOrigins = other.AllowedOrigins;
         TlsCertPath = other.TlsCertPath;
         TlsKeyPath = other.TlsKeyPath;

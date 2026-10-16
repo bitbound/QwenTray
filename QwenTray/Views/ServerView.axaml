@@ -146,6 +146,18 @@
                       IsChecked="{Binding ServeWeb}" />
 
             <StackPanel Spacing="6">
+              <CheckBox Content="Expose the daemon to the network through a local forwarder"
+                        IsChecked="{Binding LanProxy}" />
+              <TextBlock Classes="caption"
+                         TextWrapping="Wrap"
+                         Text="Starts a systemd socket inside the distro that listens on the network and forwards to the daemon on 127.0.0.1. The daemon keeps binding loopback, which is what Live Voice needs. Point the reverse proxy at this PC on the exposure port, and set its Host header to 127.0.0.1 and the daemon port, because a loopback bind answers that host and nothing else." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Classes="field" Text="Exposure port" VerticalAlignment="Center" />
+                <TextBox Width="90" Text="{Binding LanProxyPort}" IsEnabled="{Binding LanProxy}" />
+              </StackPanel>
+            </StackPanel>
+
+            <StackPanel Spacing="6">
               <CheckBox Content="Enable Local Control for paired devices"
                         IsChecked="{Binding LocalControl}" />
               <TextBlock Classes="caption"

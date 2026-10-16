@@ -14,7 +14,19 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
 
     public const string UnitName = "qwen-serve.service";
 
+    /// <summary>The forwarder the LAN exposure runs, and the socket that owns its listening port.</summary>
+    public const string ProxyUnitName = "qwen-lan-proxy.service";
+    public const string ProxySocketUnitName = "qwen-lan-proxy.socket";
+
+    /// <summary>
+    /// The forwarder systemd ships. A unit cannot look a path up, so the path is written into the unit and
+    /// a distro without it fails the exposure here rather than starting a unit that never comes up.
+    /// </summary>
+    internal const string SocketProxyPath = "/usr/lib/systemd/systemd-socket-proxyd";
+
     private const string UnitRelativePath = ".config/systemd/user/" + UnitName;
+    private const string ProxyUnitRelativePath = ".config/systemd/user/" + ProxyUnitName;
+    private const string ProxySocketRelativePath = ".config/systemd/user/" + ProxySocketUnitName;
     private const string LauncherRelativePath = ".config/qwen/serve.sh";
     private const string EnvironmentRelativePath = ".config/qwen/serve.env";
 
@@ -227,7 +239,141 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
 
             // A profile that was never set up has no unit to stop, so a failure here says nothing.
             await RunUserManagerScriptAsync(distro, other, $"systemctl --user disable --now {UnitName}", cancellationToken);
+
+            // The exposure binds a port of its own, so two profiles' sockets could not both hold it, on the
+            // same terms as the daemon's own port.
+            await RunUserManagerScriptAsync(distro, other, $"systemctl --user disable --now {ProxySocketUnitName} {ProxyUnitName}", cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// The listening half of the exposure. systemd owns the port, so it is answered after a boot with no
+    /// process of the tray's running, and the forwarder comes up on the first connection.
+    /// </summary>
+    internal static string BuildProxySocketContent(Settings settings)
+    {
+        return string.Join('\n', [
+            "[Unit]",
+            "Description=Qwen Code LAN exposure (QwenTray)",
+            "# Written by QwenTray. Change the daemon's settings in the app instead of here.",
+            string.Empty,
+            "[Socket]",
+            $"ListenStream=0.0.0.0:{settings.LanProxyPort.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+            string.Empty,
+            "[Install]",
+            "WantedBy=sockets.target",
+            string.Empty,
+        ]);
+    }
+
+    /// <summary>
+    /// The forwarding half. It dials the daemon's own loopback port, which is what its Live Voice discovery
+    /// record needs, and this is what makes that daemon reachable without it binding the network itself.
+    /// </summary>
+    internal static string BuildProxyUnitContent(Settings settings)
+    {
+        return string.Join('\n', [
+            "[Unit]",
+            "Description=Qwen Code LAN forwarder (QwenTray)",
+            "# Written by QwenTray. Change the daemon's settings in the app instead of here.",
+            $"Requires={ProxySocketUnitName}",
+            $"After={ProxySocketUnitName}",
+            $"Requires={UnitName}",
+            $"After={UnitName}",
+            string.Empty,
+            "[Service]",
+            // No PrivateNetwork, unlike the example in the man page. That example dials a unix socket, while
+            // this one dials loopback, and a private network namespace would give the process its own
+            // loopback with nothing listening behind it.
+            "Type=notify",
+            $"ExecStart={SocketProxyPath} 127.0.0.1:{settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+            // Two integers are all that reaches this unit, so systemd's specifier expansion has nothing to
+            // find. The forwarder also does not exit when idle, because its exit-idle-time defaults to
+            // infinity, so a restart here only ever recovers a process that actually failed.
+            "Restart=always",
+            "RestartSec=1",
+            string.Empty,
+        ]);
+    }
+
+    /// <summary>
+    /// Writes the exposure's two units and starts it, or takes it away when the setting is off. Writing and
+    /// restarting the socket on every start is what makes a changed port take effect, since an already
+    /// running socket keeps the port it bound.
+    /// </summary>
+    public async Task<bool> ConfigureProxyAsync(Settings settings, string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        if (!settings.LanProxy)
+        {
+            return await RemoveProxyAsync(distro, profile, cancellationToken);
+        }
+
+        var present = await wsl.RunScriptAsync(distro, profile.LinuxUser, $"test -x {WslDistro.QuotePosix(SocketProxyPath)}", cancellationToken);
+        if (!present.Succeeded)
+        {
+            _logger.LogError("{Path} is missing in the \"{Distro}\" distro, so the LAN exposure cannot start.", SocketProxyPath, distro);
+            return false;
+        }
+
+        var files = new[]
+        {
+            (Path: $"{profile.HomeDirectory}/{ProxySocketRelativePath}", Content: BuildProxySocketContent(settings), Mode: "0600"),
+            (Path: $"{profile.HomeDirectory}/{ProxyUnitRelativePath}", Content: BuildProxyUnitContent(settings), Mode: "0600"),
+        };
+
+        foreach (var file in files)
+        {
+            var written = await wsl.RunScriptAsync(distro, profile.LinuxUser, WslDistro.BuildFileWriteScript(file.Path, file.Content, file.Mode), cancellationToken);
+            if (!written.Succeeded)
+            {
+                _logger.LogError("Could not write {Path} for profile {User}. {Output}", file.Path, profile.LinuxUser, written.Output);
+                return false;
+            }
+        }
+
+        var enabled = await RunUserManagerScriptAsync(distro, profile, $"systemctl --user daemon-reload && systemctl --user enable {ProxySocketUnitName} && systemctl --user restart {ProxySocketUnitName}", cancellationToken);
+        if (!enabled.Succeeded)
+        {
+            _logger.LogError("Could not enable the LAN exposure for profile {User}. {Output}", profile.LinuxUser, enabled.Output);
+            return false;
+        }
+
+        _logger.LogInformation("Exposed the daemon in distro {Distro} on 0.0.0.0:{Port} for {User}.", distro, settings.LanProxyPort, profile.LinuxUser);
+        return true;
+    }
+
+    /// <summary>
+    /// Stops the exposure and keeps it stopped through the next boot. The unit files stay, because the
+    /// setting still asks for the exposure and the next start enables them again.
+    /// </summary>
+    public async Task<bool> StopProxyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        var result = await RunUserManagerScriptAsync(distro, profile, $"systemctl --user disable --now {ProxySocketUnitName} {ProxyUnitName}", cancellationToken);
+        if (!result.Succeeded)
+        {
+            _logger.LogDebug("The LAN exposure was not stopped for {User}. {Output}", profile.LinuxUser, result.Output);
+        }
+
+        return result.Succeeded;
+    }
+
+    /// <summary>
+    /// Takes the exposure down and deletes its units, which is what turning the setting off has to mean.
+    /// Leaving the files behind would let the next start re-enable a socket the user just asked to remove.
+    /// </summary>
+    public async Task<bool> RemoveProxyAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        await StopProxyAsync(distro, profile, cancellationToken);
+
+        var removed = true;
+        foreach (var file in new[] { $"{profile.HomeDirectory}/{ProxySocketRelativePath}", $"{profile.HomeDirectory}/{ProxyUnitRelativePath}" })
+        {
+            var deleted = await wsl.RunScriptAsync(distro, profile.LinuxUser, $"rm -f -- {WslDistro.QuotePosix(file)}", cancellationToken);
+            removed = removed && deleted.Succeeded;
+        }
+
+        await RunUserManagerScriptAsync(distro, profile, "systemctl --user daemon-reload", cancellationToken);
+        return removed;
     }
 
     /// <summary>The daemon's own process id, or nothing while systemd reports no main process.</summary>

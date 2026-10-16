@@ -340,6 +340,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
 
             await _unit.EnsureLingerAsync(_settings.WslDistroName, profile, _shutdown.Token);
             await _unit.ConfigureAsync(_settings, _settings.WslDistroName, profile, _shutdown.Token);
+            await ApplyLanProxyAsync(profile, _shutdown.Token);
             _logger.LogWarning("Port {Port} is answered by a process outside the \"{Unit}\" unit. It is running but not managed, so it will not survive a distro restart and Stop will not stop it. The unit is configured and takes over on the next start.", _settings.Port, SystemdUserService.UnitName);
             return;
         }
@@ -383,6 +384,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             }
 
             _logger.LogInformation("Handed the daemon to systemd in distro {Distro} as {User}. ArgCount={ArgCount}", _settings.WslDistroName, profile.LinuxUser, serveArguments.Count);
+
+            // The exposure is a unit pair of its own, so it is applied on the same terms as the daemon's
+            // unit: written on every start, and stood aside by Stop.
+            await ApplyLanProxyAsync(profile, _shutdown.Token);
         }
         catch (Exception exception)
         {
@@ -420,6 +425,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             // Stopping the active profile's unit is not enough to mean stopped. Whichever profile the user
             // switched away from is still enabled and serving, so it is stood aside on the same terms as start.
             await _unit.StandAsideOtherProfilesAsync(_settings.WslDistroName, _settings.ResolveActiveProfile(), _settings.Profiles, timeout.Token);
+            // The exposure goes down before the daemon it forwards to, so nothing is left listening at a
+            // port whose backend was just stopped.
+            await _unit.StopProxyAsync(_settings.WslDistroName, _settings.ResolveActiveProfile(), timeout.Token);
             await _unit.StopAsync(_settings.WslDistroName, _settings.ResolveActiveProfile(), timeout.Token);
         }
         finally
@@ -554,11 +562,26 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (settings.LocalControl && settings.ExtraArgs.Any(argument => argument.StartsWith("--hostname", StringComparison.Ordinal))) yield return "Remove the --hostname override from extra arguments to enable device pairing.";
         if (settings.LocalControl && settings.ExtraArgs.Any(argument => string.Equals(argument, "--no-web", StringComparison.Ordinal))) yield return "Remove --no-web from extra arguments to enable device pairing.";
         if (settings.LocalControl && settings.ExtraArgs.Any(argument => string.Equals(argument, "--local-control", StringComparison.Ordinal))) yield return "Remove --local-control from extra arguments because the setting already enables it.";
+        if (settings.LanProxy && settings.LanProxyPort is < 1 or > 65535) yield return "The LAN exposure port must be a number between 1 and 65535.";
+        if (settings.LanProxy && settings.LanProxyPort == settings.Port) yield return "The LAN exposure port matches the daemon's port, so the forwarder could never bind it.";
+        if (settings.LanProxy && !IsLoopbackHost(settings.Host)) yield return "The LAN exposure expects the daemon address to be 127.0.0.1. A wildcard bind already exposes the daemon, and it is what breaks Live Voice.";
         if (settings.RequireAuth && string.IsNullOrWhiteSpace(settings.Token)) yield return "Require auth is set without a token; the daemon only fails fast on a loopback bind.";
         var hasCert = !string.IsNullOrWhiteSpace(settings.TlsCertPath);
         var hasKey = !string.IsNullOrWhiteSpace(settings.TlsKeyPath);
         if (hasCert != hasKey) yield return "--tls-cert and --tls-key must both be set or both empty.";
         if (!settings.RateLimit && settings.ExtraArgs.Any(a => a.StartsWith("--rate-limit-", StringComparison.Ordinal))) yield return "rate-limit tier flags are present without rate limiting enabled.";
+    }
+
+    /// <summary>
+    /// Applies the LAN exposure to match the setting. A failure is reported without failing the start,
+    /// because the daemon is serving either way and the exposure is only an addition to it.
+    /// </summary>
+    private async Task ApplyLanProxyAsync(IdentityProfile profile, CancellationToken cancellationToken)
+    {
+        if (!await _unit.ConfigureProxyAsync(_settings, _settings.WslDistroName, profile, cancellationToken))
+        {
+            ReportProblem($"The LAN exposure could not be applied in the \"{_settings.WslDistroName}\" Linux environment. See the daemon log for the reason.");
+        }
     }
 
     private void HandleUnexpectedExit()

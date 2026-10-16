@@ -101,7 +101,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
             _logger.LogInformation("Start with Windows {State}.", settingsPage.StartOnLogin ? "enabled" : "disabled");
         }
 
-        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl}.", DaemonSupervisor.BuildServeArguments(_settings, _settings.ResolveActiveProfile()).Count, _settings.LocalControl);
+        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl} LanProxy={LanProxy}.", DaemonSupervisor.BuildServeArguments(_settings, _settings.ResolveActiveProfile()).Count, _settings.LocalControl, _settings.LanProxy);
 
         var warnings = DaemonSupervisor.ValidateSettings(_settings).ToList();
         foreach (var warning in warnings)
@@ -158,6 +158,16 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
             return "Device pairing requires the Web Shell to be enabled.";
         }
 
+        if (!int.TryParse(server.LanProxyPort.Trim(), out var lanProxyPort) || lanProxyPort is < 1 or > 65535)
+        {
+            return "The LAN exposure port must be a number between 1 and 65535.";
+        }
+
+        if (server.LanProxy && lanProxyPort == port)
+        {
+            return "The LAN exposure port matches the daemon port. The forwarder binds a port of its own, so it cannot share the daemon's.";
+        }
+
         if (string.IsNullOrWhiteSpace(environment.WslDistroName))
         {
             return "The WSL distro name cannot be empty.";
@@ -204,6 +214,8 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         _settings.EnableSessionShell = server.EnableSessionShell;
         _settings.ServeWeb = server.ServeWeb;
         _settings.LocalControl = server.LocalControl;
+        _settings.LanProxy = server.LanProxy;
+        _settings.LanProxyPort = lanProxyPort;
         server.RefreshLocalControlPairing();
         _settings.MaxSessions = ParseInt(server.MaxSessions, _settings.MaxSessions);
         _settings.MaxConnections = ParseInt(server.MaxConnections, _settings.MaxConnections);

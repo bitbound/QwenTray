@@ -70,6 +70,12 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     private bool _localControl;
 
     [ObservableProperty]
+    private bool _lanProxy;
+
+    [ObservableProperty]
+    private string _lanProxyPort = string.Empty;
+
+    [ObservableProperty]
     private Bitmap? _localControlPairingQr;
 
     [ObservableProperty]
@@ -159,6 +165,8 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         EnableSessionShell = _settings.EnableSessionShell;
         ServeWeb = _settings.ServeWeb;
         LocalControl = _settings.LocalControl;
+        LanProxy = _settings.LanProxy;
+        LanProxyPort = _settings.LanProxyPort.ToString();
         MaxSessions = _settings.MaxSessions.ToString();
         MaxConnections = _settings.MaxConnections.ToString();
         EventRingSize = _settings.EventRingSize.ToString();

@@ -245,6 +245,81 @@ public sealed class SystemdUnitTests
         Assert.Equal(4321, await unit.ReadMainPidAsync("QwenTray", Profile(), CancellationToken.None));
     }
 
+    [Fact]
+    public void TheExposureListensOnTheNetworkAndForwardsToTheLoopbackDaemon()
+    {
+        var settings = new Settings { Port = 4170, LanProxy = true, LanProxyPort = 4171 };
+
+        var socket = SystemdUserService.BuildProxySocketContent(settings);
+        var unit = SystemdUserService.BuildProxyUnitContent(settings);
+
+        // systemd owns the listening port, so the exposure is answered after a boot with no tray running.
+        Assert.Contains("ListenStream=0.0.0.0:4171", socket, StringComparison.Ordinal);
+        Assert.Contains("WantedBy=sockets.target", socket, StringComparison.Ordinal);
+
+        // The forward target is the daemon's own loopback port, which is what keeps its discovery record a
+        // loopback URL and Live Voice working.
+        Assert.Contains($"ExecStart={SystemdUserService.SocketProxyPath} 127.0.0.1:4170", unit, StringComparison.Ordinal);
+        Assert.Contains($"Requires={SystemdUserService.ProxySocketUnitName}", unit, StringComparison.Ordinal);
+        Assert.Contains($"Requires={SystemdUserService.UnitName}", unit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheExposureDoesNotPutTheForwarderInItsOwnNetworkNamespace()
+    {
+        // The man page's example sets PrivateNetwork=yes, and its target is a unix socket. This one dials
+        // loopback, where a private namespace would give the process its own loopback and nothing behind it,
+        // so the exposure would accept connections and forward every one of them into nothing.
+        var unit = SystemdUserService.BuildProxyUnitContent(new Settings { LanProxy = true });
+
+        Assert.DoesNotContain("PrivateNetwork", unit, StringComparison.Ordinal);
+        Assert.Contains("Type=notify", unit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TurningTheExposureOnWritesBothUnitsAndRestartsTheSocket()
+    {
+        var wsl = new FakeWslDistro();
+        var unit = new SystemdUserService(wsl);
+
+        Assert.True(await unit.ConfigureProxyAsync(new Settings { LanProxy = true, LanProxyPort = 4171 }, "QwenTray", Profile(), CancellationToken.None));
+
+        Assert.Contains(wsl.UserScripts, entry => Decode(entry.Script).Contains("ListenStream=0.0.0.0:4171", StringComparison.Ordinal));
+        Assert.Contains(wsl.UserScripts, entry => Decode(entry.Script).Contains("systemd-socket-proxyd 127.0.0.1:4170", StringComparison.Ordinal));
+
+        // Restarting the socket is what re-binds a port an already running socket still holds, which is how
+        // a changed exposure port takes effect.
+        Assert.Contains(wsl.Scripts, script => script.Contains("daemon-reload && systemctl --user enable qwen-lan-proxy.socket && systemctl --user restart qwen-lan-proxy.socket", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TurningTheExposureOffRemovesBothOfItsUnits()
+    {
+        // Leaving the files behind would let the next start enable a socket the user just turned off.
+        var wsl = new FakeWslDistro();
+        var unit = new SystemdUserService(wsl);
+
+        Assert.True(await unit.ConfigureProxyAsync(new Settings { LanProxy = false }, "QwenTray", Profile(), CancellationToken.None));
+
+        Assert.Contains(wsl.UserScripts, entry => entry.Script.Contains("disable --now qwen-lan-proxy.socket qwen-lan-proxy.service", StringComparison.Ordinal));
+        Assert.Contains(wsl.Scripts, script => script.Contains("rm -f -- '/home/qwen/.config/systemd/user/qwen-lan-proxy.socket'", StringComparison.Ordinal));
+        Assert.Contains(wsl.Scripts, script => script.Contains("rm -f -- '/home/qwen/.config/systemd/user/qwen-lan-proxy.service'", StringComparison.Ordinal));
+        Assert.DoesNotContain(wsl.UserScripts, entry => Decode(entry.Script).Contains("[Socket]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnExposureWithoutTheForwarderBinaryFailsBeforeWritingAUnit()
+    {
+        // The forwarder ships with systemd, so its absence is a distro problem worth naming here rather
+        // than a unit that never comes up and says nothing.
+        var wsl = new FakeWslDistro { ScriptExitCode = 1 };
+        var unit = new SystemdUserService(wsl);
+
+        Assert.False(await unit.ConfigureProxyAsync(new Settings { LanProxy = true }, "QwenTray", Profile(), CancellationToken.None));
+        Assert.DoesNotContain(wsl.UserScripts, entry => Decode(entry.Script).Contains("[Socket]", StringComparison.Ordinal));
+        Assert.DoesNotContain(wsl.Scripts, script => script.Contains("enable qwen-lan-proxy.socket", StringComparison.Ordinal));
+    }
+
     /// <summary>Reads file content back out of the base64 that a write script carries.</summary>
     private static string Decode(string script)
     {
