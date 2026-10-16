@@ -24,6 +24,12 @@ internal sealed class FakeWslDistro : IWslDistro
     /// <summary>How many times a caller tried to boot the distro through this double.</summary>
     public int StartDaemonCalls { get; private set; }
 
+    /// <summary>Holds a terminate open so a caller can watch the daemon mid-stop.</summary>
+    public TaskCompletionSource? TerminateGate { get; set; }
+
+    /// <summary>When set, a terminate throws the way a missing wsl.exe would.</summary>
+    public Exception? TerminateFailure { get; set; }
+
     public int ImportExitCode { get; set; }
 
     public int ExportExitCode { get; set; }
@@ -58,10 +64,12 @@ internal sealed class FakeWslDistro : IWslDistro
     public Task<WslCommandResult> InstallDistroAsync(string distro, CancellationToken cancellationToken)
         => Task.FromResult(new WslCommandResult(0, string.Empty));
 
-    public Task<WslCommandResult> TerminateAsync(string distro, CancellationToken cancellationToken)
+    public async Task<WslCommandResult> TerminateAsync(string distro, CancellationToken cancellationToken)
     {
         TerminatedDistros.Add(distro);
-        return Task.FromResult(new WslCommandResult(0, string.Empty));
+        if (TerminateFailure is not null) throw TerminateFailure;
+        if (TerminateGate is { } gate) await gate.Task;
+        return new WslCommandResult(0, string.Empty);
     }
 
     public Task<WslCommandResult> UnregisterAsync(string distro, CancellationToken cancellationToken)

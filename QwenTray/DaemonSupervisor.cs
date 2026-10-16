@@ -246,7 +246,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             _logger.LogInformation("Start requested while the distro is held for {Reason}; ignoring.", HoldReason);
             return;
         }
-        if (State is DaemonState.Starting or DaemonState.Running)
+        if (State is DaemonState.Starting or DaemonState.Running or DaemonState.Stopping)
         {
             _logger.LogDebug("Start requested while already {State}; ignoring.", State);
             return;
@@ -307,27 +307,39 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _logger.LogInformation("Stop requested; state {State}.", State);
         _intentionalExit = true;
         _adopted = false;
+
+        // The stopping state goes up before the shutdown token is cancelled. A poll that lands in
+        // between then sees a cancelled health probe, and the state it reads has to say the daemon is
+        // leaving rather than that a start never finished.
+        _machine.BeginStop();
+        PublishState();
         _shutdown.Cancel();
 
         var process = _process;
         _process = null;
-        if (process is not null)
-        {
-            try
-            {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException) { }
-        }
-
-        // Killing wsl.exe only ends the client. Terminating the distro is what guarantees the daemon
-        // is gone and that the port is free for the next profile.
         using var termination = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await _wsl.TerminateAsync(_settings.WslDistroName, termination.Token);
+        try
+        {
+            if (process is not null)
+            {
+                try
+                {
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException) { }
+            }
 
-        SetLocalControlPairingUrl(null);
-        _machine.UserStopped();
-        PublishState();
+            // Killing wsl.exe only ends the client. Terminating the distro is what guarantees the daemon
+            // is gone and that the port is free for the next profile.
+            await _wsl.TerminateAsync(_settings.WslDistroName, termination.Token);
+        }
+        finally
+        {
+            // Every way out of the teardown settles the state, or every command stays disabled.
+            SetLocalControlPairingUrl(null);
+            _machine.UserStopped();
+            PublishState();
+        }
     }
 
     public async Task RestartAsync()
@@ -363,8 +375,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         }
 
         // A Stopped supervisor owns no daemon. Adoption happens only in StartAsync, so a stray process
-        // answering the health port must not pull a stopped tray into Running here.
-        if (State == DaemonState.Stopped) return;
+        // answering the health port must not pull a stopped tray into Running here. A stop in flight is
+        // skipped for the same reason: it cancelled the shutdown token this probe runs under, so a
+        // missing answer says nothing about the daemon.
+        if (State is DaemonState.Stopped or DaemonState.Stopping) return;
 
         var healthy = await IsHealthyAsync();
         if (healthy)

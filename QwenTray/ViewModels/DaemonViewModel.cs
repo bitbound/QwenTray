@@ -268,6 +268,7 @@ public sealed partial class DaemonViewModel : ViewModelBase<DaemonView>
         {
             DaemonState.Running => "Running",
             DaemonState.Starting => "Starting",
+            DaemonState.Stopping => "Stopping",
             DaemonState.Crashed => "Crashed",
             _ => "Stopped",
         };

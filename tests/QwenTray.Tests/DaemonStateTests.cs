@@ -49,6 +49,23 @@ public sealed class DaemonStateTests
         Assert.Equal(DaemonState.Running, state.State);
         Assert.Equal(0, state.ConsecutiveFailures);
     }
+
+    [Fact]
+    public void AFailedHealthCheckDuringAStopDoesNotLookLikeAStart()
+    {
+        var state = new DaemonStateMachine();
+        state.BeginStart();
+        state.HealthSucceeded();
+
+        state.BeginStop();
+        Assert.Equal(DaemonState.Stopping, state.State);
+
+        state.HealthFailed();
+        Assert.Equal(DaemonState.Stopping, state.State);
+
+        state.UserStopped();
+        Assert.Equal(DaemonState.Stopped, state.State);
+    }
 }
 
 public sealed class DaemonCommandAvailabilityTests
@@ -57,6 +74,7 @@ public sealed class DaemonCommandAvailabilityTests
     [InlineData(DaemonState.Stopped, true, false, false)]
     [InlineData(DaemonState.Starting, false, true, false)]
     [InlineData(DaemonState.Running, false, true, true)]
+    [InlineData(DaemonState.Stopping, false, false, false)]
     [InlineData(DaemonState.Crashed, false, false, true)]
     public void AvailabilityFollowsState(DaemonState state, bool canStart, bool canStop, bool canRestart)
     {
@@ -70,6 +88,7 @@ public sealed class DaemonCommandAvailabilityTests
     [InlineData(DaemonState.Stopped)]
     [InlineData(DaemonState.Starting)]
     [InlineData(DaemonState.Running)]
+    [InlineData(DaemonState.Stopping)]
     [InlineData(DaemonState.Crashed)]
     public void BusyDisablesEveryCommand(DaemonState state)
     {

@@ -148,6 +148,7 @@ public partial class MainWindowViewModel : ViewModelBase<MainWindow>, IMainWindo
         {
             DaemonState.Running => "Daemon running",
             DaemonState.Starting => "Daemon starting",
+            DaemonState.Stopping => "Daemon stopping",
             DaemonState.Crashed => "Daemon crashed",
             _ => "Daemon stopped",
         };
