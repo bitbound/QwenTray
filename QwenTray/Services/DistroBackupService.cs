@@ -36,7 +36,16 @@ public sealed class DistroBackupService(
 
     private static string WslRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wsl");
 
-    public static string DefaultBundlePath() => Path.Combine(BackupDirectory, $"qwentray-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+    /// <summary>
+    /// A bundle path under <paramref name="directory"/>, or under the app's own backups folder when
+    /// that is empty. The name carries a timestamp so an export never lands on an earlier bundle.
+    /// </summary>
+    public static string DefaultBundlePath(string? directory = null) =>
+        Path.Combine(
+          string.IsNullOrWhiteSpace(directory) 
+            ? BackupDirectory 
+            : directory.Trim(), 
+          $"qwentray-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
 
     /// <summary>
     /// Reads and checks a bundle without changing anything, so the page can say what is about to be

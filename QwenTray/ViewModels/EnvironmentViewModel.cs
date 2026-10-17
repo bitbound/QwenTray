@@ -136,9 +136,10 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
             DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy && !IsBackupBusy));
         }
 
-        // The shared save reads the distro name even when the user never opened this page, so the
-        // singleton has to carry the stored value from construction.
+        // The shared save reads the distro name and the bundle path even when the user never opened
+        // this page, so the singleton has to carry the stored values from construction.
         WslDistroName = _settings.WslDistroName;
+        BundlePath = DistroBackupService.DefaultBundlePath(_settings.BundleDirectory);
     }
 
     public bool DistroIsChecking => !HasCheckedDistro || IsDistroBusy;
@@ -197,8 +198,11 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     protected override Task OnInitializeAsync()
     {
         WslDistroName = _settings.WslDistroName;
-        // A typed path survives a revisit, while a first visit gets somewhere sensible to write to.
-        if (string.IsNullOrWhiteSpace(BundlePath)) BundlePath = DistroBackupService.DefaultBundlePath();
+        // A typed path survives a revisit, while an emptied field gets a fresh name in the stored folder.
+        if (string.IsNullOrWhiteSpace(BundlePath))
+        {
+            BundlePath = DistroBackupService.DefaultBundlePath(_settings.BundleDirectory);
+        }
 
         // Surface the Linux environment state without waiting on wsl.exe, so the page opens instantly and
         // fills in as the distro answers.

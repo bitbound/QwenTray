@@ -140,6 +140,7 @@ public sealed class SettingsSaveTests
         await pages.InitializeAsync();
 
         pages.Environment.WslDistroName = "MyTray";
+        pages.Environment.BundlePath = @"D:\bundles\qwentray-20260101-120000.zip";
         pages.Server.Host = "0.0.0.0";
         pages.Server.Port = "5199";
         pages.Server.Token = " bearer ";
@@ -166,6 +167,8 @@ public sealed class SettingsSaveTests
 
         var settings = pages.Settings;
         Assert.Equal("MyTray", settings.WslDistroName);
+        // Only the folder is kept, because the file name is generated fresh for each export.
+        Assert.Equal(@"D:\bundles", settings.BundleDirectory);
         Assert.Equal("0.0.0.0", settings.Host);
         Assert.Equal(5199, settings.Port);
         Assert.Equal("bearer", settings.Token);
@@ -198,6 +201,7 @@ public sealed class SettingsSaveTests
         var settings = new Settings
         {
             WslDistroName = "MyTray",
+            BundleDirectory = @"E:\My Backups",
             Port = 8080,
             Token = "saved-token",
             RequireAuth = true,
@@ -219,6 +223,7 @@ public sealed class SettingsSaveTests
         Assert.Null(pages.Save.TryApplyToSettings());
 
         Assert.Equal("MyTray", settings.WslDistroName);
+        Assert.Equal(@"E:\My Backups", settings.BundleDirectory);
         Assert.Equal(8080, settings.Port);
         Assert.Equal("saved-token", settings.Token);
         Assert.True(settings.RequireAuth);

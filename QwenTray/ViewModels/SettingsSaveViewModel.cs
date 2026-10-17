@@ -202,6 +202,13 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         }
 
         _settings.WslDistroName = distroName;
+        // The folder is what is kept. The file name carries a timestamp so an export never lands on an
+        // earlier bundle, and only the folder survives to the next run.
+        var bundlePath = environment.BundlePath.Trim();
+        _settings.BundleDirectory = bundlePath.Length == 0
+            ? string.Empty
+            : Path.GetDirectoryName(bundlePath)
+              ?? string.Empty;
         _settings.Profiles = [.. identity.Profiles];
         _settings.ActiveProfileId = identity.SelectedProfile?.Id ?? identity.Profiles[0].Id;
         _settings.Host = server.Host.Trim();

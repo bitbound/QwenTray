@@ -82,6 +82,13 @@ public sealed class IdentityProfile
 public sealed class Settings
 {
     public string WslDistroName { get; set; } = "QwenTray";
+
+    /// <summary>
+    /// The folder a bundle is written to. Empty means the app's own backups folder. The file name is
+    /// generated inside it, because an export refuses to overwrite an earlier bundle.
+    /// </summary>
+    public string BundleDirectory { get; set; } = "";
+
     public string ActiveProfileId { get; set; } = "";
     public IdentityProfile[] Profiles { get; set; } = [];
 
