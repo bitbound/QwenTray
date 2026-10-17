@@ -39,7 +39,8 @@ internal sealed class SettingsPages
             Settings, new IdentityService(wsl, NullLogger<IdentityService>.Instance),
             new WslConfigSyncService(fileSystem, wsl, NullLogger<WslConfigSyncService>.Instance),
             provisioner, Environment, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
-        Server = new ServerViewModel(Settings, supervisor, provisioner, Environment, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
+        Firewall = new FakeFirewallRules();
+        Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Environment, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
         Page = new SettingsViewModel(Settings, autostart, null!, null!, supervisor, null!, Snackbars, Save, NullLogger<SettingsViewModel>.Instance);
 
         _provider.Environment = Environment;
@@ -57,6 +58,9 @@ internal sealed class SettingsPages
     public IdentityViewModel Identity { get; }
 
     public ServerViewModel Server { get; }
+
+    /// <summary>The firewall double the Server page holds, so a test can inspect what it was asked.</summary>
+    public FakeFirewallRules Firewall { get; }
 
     /// <summary>The Settings page, which is the tray app's own preferences.</summary>
     public SettingsViewModel Page { get; }
@@ -104,6 +108,31 @@ internal sealed class SettingsPages
             if (serviceType == typeof(SettingsViewModel)) return Settings;
             return null;
         }
+    }
+}
+
+/// <summary>
+/// Stands in for the firewall service on the Server page, which only reaches it when a button runs.
+/// Each call is recorded so a test can prove which port the page asked for.
+/// </summary>
+internal sealed class FakeFirewallRules : IFirewallRuleService
+{
+    public List<int> AllowedPorts { get; } = [];
+
+    public int RemoveCalls { get; private set; }
+
+    public FirewallRuleResult NextResult { get; set; } = FirewallRuleResult.Created;
+
+    public Task<FirewallRuleResult> AllowInboundPortAsync(int port, CancellationToken cancellationToken)
+    {
+        AllowedPorts.Add(port);
+        return Task.FromResult(NextResult);
+    }
+
+    public Task<FirewallRuleResult> RemoveAsync(CancellationToken cancellationToken)
+    {
+        RemoveCalls++;
+        return Task.FromResult(NextResult);
     }
 }
 

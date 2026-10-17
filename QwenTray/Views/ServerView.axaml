@@ -154,6 +154,18 @@
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Classes="field" Text="Exposure port" VerticalAlignment="Center" />
                 <TextBox Width="90" Text="{Binding LanProxyPort}" IsEnabled="{Binding LanProxy}" />
+                <Button Content="Allow in firewall"
+                        Classes="Primary VariantOutlined"
+                        VerticalAlignment="Center"
+                        Command="{Binding AllowFirewallPortCommand}"
+                        IsEnabled="{Binding CanEditFirewall}"
+                        ToolTip.Tip="Asks Windows for permission to add a firewall rule named QwenTray that allows inbound TCP on this port." />
+                <Button Content="Remove rule"
+                        Classes="VariantOutlined"
+                        VerticalAlignment="Center"
+                        Command="{Binding RemoveFirewallRuleCommand}"
+                        IsEnabled="{Binding CanEditFirewall}"
+                        ToolTip.Tip="Asks Windows for permission to delete the QwenTray firewall rule." />
               </StackPanel>
             </StackPanel>
 

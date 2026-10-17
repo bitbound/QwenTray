@@ -108,6 +108,7 @@ internal static class Program
         services.AddSingleton<SystemdUserService>();
         services.AddSingleton<DaemonSupervisor>();
         services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();
+        services.AddSingleton<IFirewallRuleService, FirewallRuleService>();
 
         services.AddSingleton(AppInfo.Current());
         services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(60) });

@@ -17,6 +17,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     private readonly Settings _settings;
     private readonly DaemonSupervisor _supervisor;
     private readonly WslDistroProvisioner _provisioner;
+    private readonly IFirewallRuleService _firewall;
     private readonly EnvironmentViewModel _environment;
     private readonly IdentityViewModel _identity;
     private readonly SettingsSaveViewModel _save;
@@ -70,6 +71,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     private bool _localControl;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditFirewall))]
     private bool _lanProxy;
 
     [ObservableProperty]
@@ -102,10 +104,21 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     [ObservableProperty]
     private string _extraArgs = string.Empty;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditFirewall))]
+    private bool _isFirewallBusy;
+
+    /// <summary>
+    /// Whether a firewall button can be pressed. The exposure has to be on, because the opening is
+    /// only worth having while something is meant to be listening on it.
+    /// </summary>
+    public bool CanEditFirewall => LanProxy && !IsFirewallBusy;
+
     public ServerViewModel(
         Settings settings,
         DaemonSupervisor supervisor,
         WslDistroProvisioner provisioner,
+        IFirewallRuleService firewall,
         EnvironmentViewModel environment,
         IdentityViewModel identity,
         SettingsSaveViewModel save,
@@ -115,6 +128,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         _settings = settings;
         _supervisor = supervisor;
         _provisioner = provisioner;
+        _firewall = firewall;
         _environment = environment;
         _identity = identity;
         _save = save;
@@ -260,6 +274,87 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         {
             QwenProgress = null;
             IsQwenBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Opens the Windows Firewall port the forwarder listens on. The port comes from the field rather
+    /// than the saved settings, so the opening can be made for an edit the user has not saved yet.
+    /// </summary>
+    [RelayCommand]
+    private async Task AllowFirewallPortAsync()
+    {
+        if (!TryParseExposurePort(out var port))
+        {
+            _snackbars.Show("The exposure port must be a number between 1 and 65535.", SnackbarKind.Warning);
+            return;
+        }
+
+        IsFirewallBusy = true;
+        try
+        {
+            var result = await _firewall.AllowInboundPortAsync(port, CancellationToken.None);
+            ReportFirewallResult(result, $"Windows Firewall now allows inbound TCP on port {port}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Opening the firewall port {Port} failed.", port);
+            _snackbars.Show($"Opening the firewall port failed: {ex.Message}", SnackbarKind.Error);
+        }
+        finally
+        {
+            IsFirewallBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RemoveFirewallRuleAsync()
+    {
+        IsFirewallBusy = true;
+        try
+        {
+            var result = await _firewall.RemoveAsync(CancellationToken.None);
+            ReportFirewallResult(result, "Removed the QwenTray firewall rule.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Removing the firewall rule failed.");
+            _snackbars.Show($"Removing the firewall rule failed: {ex.Message}", SnackbarKind.Error);
+        }
+        finally
+        {
+            IsFirewallBusy = false;
+        }
+    }
+
+    /// <summary>The same range the shared save and the supervisor's own validation use.</summary>
+    private bool TryParseExposurePort(out int port)
+    {
+        var parsed = int.TryParse(LanProxyPort.Trim(), out port) && port is >= 1 and <= 65535;
+        return parsed;
+    }
+
+    /// <summary>
+    /// A dismissed consent prompt is not a failure, so it is reported as a warning that says nothing
+    /// changed rather than as an error the user has to act on.
+    /// </summary>
+    private void ReportFirewallResult(FirewallRuleResult result, string success)
+    {
+        switch (result.Outcome)
+        {
+            case FirewallRuleOutcome.Created:
+            case FirewallRuleOutcome.Removed:
+                _snackbars.Show(success, SnackbarKind.Success);
+                break;
+            case FirewallRuleOutcome.Cancelled:
+                _snackbars.Show("No change was made, because the Windows consent prompt was dismissed.", SnackbarKind.Warning);
+                break;
+            case FirewallRuleOutcome.AlreadyAbsent:
+                _snackbars.Show("There was no QwenTray firewall rule to remove.", SnackbarKind.Info);
+                break;
+            default:
+                _snackbars.Show($"Windows Firewall refused the change. {result.Detail}", SnackbarKind.Error);
+                break;
         }
     }
 
