@@ -68,8 +68,16 @@ public sealed class BackupBundle(IFileSystem fileSystem)
             ZipArchiveMode.Create,
             leaveOpen: false);
 
-        await WriteBytesAsync(archive, ManifestEntry, JsonSerializer.SerializeToUtf8Bytes(manifest, QwenTrayJsonContext.Default.BackupManifest), cancellationToken);
-        await WriteBytesAsync(archive, SettingsEntry, Encoding.UTF8.GetBytes(settingsJson), cancellationToken);
+        await WriteBytesAsync(
+            archive,
+            ManifestEntry,
+            JsonSerializer.SerializeToUtf8Bytes(manifest, QwenTrayJsonContext.Default.BackupManifest),
+            cancellationToken);
+        await WriteBytesAsync(
+            archive,
+            SettingsEntry,
+            Encoding.UTF8.GetBytes(settingsJson),
+            cancellationToken);
 
         var entry = archive.CreateEntry(TarEntry, CompressionLevel.NoCompression);
         await using (var target = entry.Open())
@@ -97,7 +105,9 @@ public sealed class BackupBundle(IFileSystem fileSystem)
             throw new InvalidOperationException($"This bundle uses schema {manifest.SchemaVersion}, which this QwenTray no longer reads.");
         }
 
-        return new BundleContents(manifest, Encoding.UTF8.GetString(await ReadEntryBytesAsync(archive, SettingsEntry, cancellationToken)));
+        return new BundleContents(
+            manifest,
+            Encoding.UTF8.GetString(await ReadEntryBytesAsync(archive, SettingsEntry, cancellationToken)));
     }
 
     /// <summary>
@@ -128,7 +138,10 @@ public sealed class BackupBundle(IFileSystem fileSystem)
             throw new FileNotFoundException($"No bundle at {bundlePath}.", bundlePath);
         }
 
-        return new ZipArchive(fileSystem.OpenFileStream(bundlePath, FileMode.Open, FileAccess.Read, FileShare.Read), ZipArchiveMode.Read, leaveOpen: false);
+        return new ZipArchive(
+            fileSystem.OpenFileStream(bundlePath, FileMode.Open, FileAccess.Read, FileShare.Read),
+            ZipArchiveMode.Read,
+            leaveOpen: false);
     }
 
     private static async Task WriteBytesAsync(ZipArchive archive, string name, byte[] bytes, CancellationToken cancellationToken)

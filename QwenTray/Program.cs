@@ -162,5 +162,9 @@ internal static class Program
         return services.BuildServiceProvider();
     }
 
-    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().LogToTrace();
+    public static AppBuilder BuildAvaloniaApp() =>
+        AppBuilder.Configure<App>()
+            .UsePlatformDetect()
+            .WithInterFont()
+            .LogToTrace();
 }

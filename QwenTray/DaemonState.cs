@@ -31,11 +31,37 @@ public sealed class DaemonStateMachine
 
     public void BeginStart() => State = DaemonState.Starting;
     public void BeginStop() => State = DaemonState.Stopping;
-    public void Adopt() { State = DaemonState.Running; ConsecutiveFailures = 0; }
-    public void HealthSucceeded() { State = DaemonState.Running; ConsecutiveFailures = 0; }
-    public void HealthFailed() { if (State is DaemonState.Starting or DaemonState.Running) State = DaemonState.Starting; }
-    public void UnexpectedExit() { State = DaemonState.Crashed; ConsecutiveFailures++; }
-    public void UserStopped() { State = DaemonState.Stopped; ConsecutiveFailures = 0; }
+    public void Adopt()
+    {
+        State = DaemonState.Running;
+        ConsecutiveFailures = 0;
+    }
+
+    public void HealthSucceeded()
+    {
+        State = DaemonState.Running;
+        ConsecutiveFailures = 0;
+    }
+
+    public void HealthFailed()
+    {
+        if (State is DaemonState.Starting or DaemonState.Running)
+        {
+            State = DaemonState.Starting;
+        }
+    }
+
+    public void UnexpectedExit()
+    {
+        State = DaemonState.Crashed;
+        ConsecutiveFailures++;
+    }
+
+    public void UserStopped()
+    {
+        State = DaemonState.Stopped;
+        ConsecutiveFailures = 0;
+    }
 
     public int BackoffSeconds(int maximum)
     {

@@ -228,7 +228,9 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
             else
             {
                 var upToDate = string.Equals(installed, latest, StringComparison.Ordinal);
-                _snackbars.Show(upToDate ? $"Version {installed} is up to date." : $"Installed {installed}, latest {latest}.", upToDate ? SnackbarKind.Success : SnackbarKind.Info);
+                _snackbars.Show(
+                    upToDate ? $"Version {installed} is up to date." : $"Installed {installed}, latest {latest}.",
+                    upToDate ? SnackbarKind.Success : SnackbarKind.Info);
             }
         }
         catch (Exception ex)
@@ -367,11 +369,20 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     internal void RefreshLocalControlPairing()
     {
         var url = _supervisor.LocalControlPairingUrl;
-        ShowLocalControlPairingPending = LocalControl && string.Equals(Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase) && ServeWeb && string.IsNullOrWhiteSpace(url);
+        ShowLocalControlPairingPending = LocalControl
+            && string.Equals(Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            && ServeWeb
+            && string.IsNullOrWhiteSpace(url);
         LocalControlPairingQr?.Dispose();
         LocalControlPairingQr = null;
         HasLocalControlPairingQr = false;
-        if (!LocalControl || !string.Equals(Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase) || !ServeWeb || string.IsNullOrWhiteSpace(url)) return;
+        if (!LocalControl
+            || !string.Equals(Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || !ServeWeb
+            || string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
 
         try
         {

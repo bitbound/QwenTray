@@ -67,7 +67,8 @@ public sealed class IdentityProfile
     internal static string SlugifyLinuxUser(string value)
     {
         var lowered = value.Trim().ToLowerInvariant();
-        var cleaned = new string([.. lowered.Select(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' ? character : '_')]);
+        var cleaned = new string([.. lowered.Select(character =>
+            char.IsAsciiLetterOrDigit(character) || character is '_' or '-' ? character : '_')]);
         if (cleaned.Length == 0 || (!char.IsAsciiLetter(cleaned[0]) && cleaned[0] != '_')) cleaned = "user" + cleaned;
         return cleaned.Length > 32 ? cleaned[..32] : cleaned;
     }
@@ -352,7 +353,9 @@ internal static class SettingsCipher
         System.Security.Cryptography.ProtectedData.Unprotect(ciphertext, Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser));
 }
 
-[System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(
+    PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase,
+    WriteIndented = true)]
 [System.Text.Json.Serialization.JsonSerializable(typeof(Settings))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(QwenTray.Services.BackupManifest))]
 public partial class QwenTrayJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

@@ -169,7 +169,9 @@ public sealed class WslDistroProvisioner(
         else
         {
             var insertAt = wsl2Index + 1;
-            while (insertAt < lines.Count && !lines[insertAt].TrimStart().StartsWith('[') && lines[insertAt].Trim().Length != 0)
+            while (insertAt < lines.Count
+                && !lines[insertAt].TrimStart().StartsWith('[')
+                && lines[insertAt].Trim().Length != 0)
             {
                 if (lines[insertAt].TrimStart().StartsWith("networkingMode", StringComparison.OrdinalIgnoreCase))
                 {
@@ -179,7 +181,9 @@ public sealed class WslDistroProvisioner(
                 insertAt++;
             }
 
-            if (insertAt >= lines.Count || lines[insertAt].Trim().Length == 0 || lines[insertAt].TrimStart().StartsWith('['))
+            if (insertAt >= lines.Count
+                || lines[insertAt].Trim().Length == 0
+                || lines[insertAt].TrimStart().StartsWith('['))
             {
                 lines.Insert(insertAt, "networkingMode=mirrored");
             }

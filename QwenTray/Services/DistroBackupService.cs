@@ -103,7 +103,12 @@ public sealed class DistroBackupService(
                 SourceUserName = Environment.UserName,
             };
 
-            await bundle.WriteAsync(bundlePath, manifest, JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings), tempTar, cancellationToken);
+            await bundle.WriteAsync(
+                bundlePath,
+                manifest,
+                JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings),
+                tempTar,
+                cancellationToken);
 
             var bundleBytes = fileSystem.GetFileInfo(bundlePath).Length;
             logger.LogInformation("Exported the {Distro} distro to {Bundle} ({BundleBytes} bytes).", distro, bundlePath, bundleBytes);
@@ -126,7 +131,10 @@ public sealed class DistroBackupService(
         var distro = manifest.WslDistroName;
         var imported = ReadSettings(contents.SettingsJson);
 
-        RequireFreeSpace(WslRoot, manifest.DistroTarBytes > 0 ? manifest.DistroTarBytes * 2 + HeadroomBytes : 0, "import");
+        RequireFreeSpace(
+            WslRoot,
+            manifest.DistroTarBytes > 0 ? manifest.DistroTarBytes * 2 + HeadroomBytes : 0,
+            "import");
 
         var workDirectory = Path.Combine(TransferDirectory, Guid.NewGuid().ToString("N"));
         try
@@ -158,7 +166,10 @@ public sealed class DistroBackupService(
         }
         finally
         {
-            if (fileSystem.DirectoryExists(workDirectory)) fileSystem.DeleteDirectory(workDirectory, recursive: true);
+            if (fileSystem.DirectoryExists(workDirectory))
+            {
+                fileSystem.DeleteDirectory(workDirectory, recursive: true);
+            }
         }
     }
 
@@ -214,7 +225,9 @@ public sealed class DistroBackupService(
         return target;
     }
 
-    private bool IsEmpty(string directory) => fileSystem.GetDirectories(directory).Length == 0 && fileSystem.GetFiles(directory).Length == 0;
+    private bool IsEmpty(string directory) =>
+        fileSystem.GetDirectories(directory).Length == 0
+        && fileSystem.GetFiles(directory).Length == 0;
 
     /// <summary>
     /// Stops an operation that clearly cannot finish before it has destroyed anything. A zero requirement
@@ -228,7 +241,8 @@ public sealed class DistroBackupService(
         if (string.IsNullOrEmpty(root)) return;
 
         var drive = fileSystem.GetDrives()
-            .FirstOrDefault(candidate => string.Equals(candidate.Name.TrimEnd('\\'), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(candidate =>
+                string.Equals(candidate.Name.TrimEnd('\\'), root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
         if (drive is null || !drive.IsReady || drive.TotalFreeSpace >= requiredBytes) return;
 
         throw new InvalidOperationException($"Not enough room on {drive.Name} to {operation} this bundle. It needs about {FormatBytes(requiredBytes)} and {FormatBytes(drive.TotalFreeSpace)} is free.");

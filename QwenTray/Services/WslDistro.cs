@@ -253,8 +253,12 @@ public sealed class WslDistro : IWslDistro
 
         // Both pipes are drained at once. Reading one to its end while the other fills its buffer
         // deadlocks, and a command that fails can put plenty on stderr before it exits.
-        var outputTask = process.StandardOutput is { } outputReader ? outputReader.ReadToEndAsync(token) : Task.FromResult(string.Empty);
-        var errorTask = process.StandardError is { } errorReader ? errorReader.ReadToEndAsync(token) : Task.FromResult(string.Empty);
+        var outputTask = process.StandardOutput is { } outputReader
+            ? outputReader.ReadToEndAsync(token)
+            : Task.FromResult(string.Empty);
+        var errorTask = process.StandardError is { } errorReader
+            ? errorReader.ReadToEndAsync(token)
+            : Task.FromResult(string.Empty);
 
         try
         {
@@ -276,7 +280,9 @@ public sealed class WslDistro : IWslDistro
             return new WslCommandResult(-1, $"wsl.exe did not answer within {invocation.Timeout.TotalSeconds:0} seconds, which a wedged Linux environment explains.") { TimedOut = true };
         }
 
-        return new WslCommandResult(process.ExitCode, CombineCommandOutput(process.ExitCode, outputTask.Result, errorTask.Result).Trim('\0', '\uFEFF'));
+        return new WslCommandResult(
+            process.ExitCode,
+            CombineCommandOutput(process.ExitCode, outputTask.Result, errorTask.Result).Trim('\0', '\uFEFF'));
     }
 
     /// <summary>

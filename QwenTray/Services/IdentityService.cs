@@ -84,7 +84,12 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
 
     public async Task SetGitHubTokenAsync(string distro, IdentityProfile profile, string token, CancellationToken cancellationToken)
     {
-        var result = await wsl.RunScriptWithInputAsync(distro, profile.LinuxUser, BuildGitHubTokenScript(), token.Trim(), cancellationToken);
+        var result = await wsl.RunScriptWithInputAsync(
+            distro,
+            profile.LinuxUser,
+            BuildGitHubTokenScript(),
+            token.Trim(),
+            cancellationToken);
         if (!result.Succeeded) throw new InvalidOperationException($"Could not store the GitHub token for {profile.Name}. {result.Output}");
         logger.LogInformation("Stored a GitHub token for profile {Profile}.", profile.Name);
     }
@@ -138,7 +143,9 @@ public sealed class IdentityService(IWslDistro wsl, ILogger<IdentityService> log
     /// </summary>
     internal static GitHubAuthStatus ParseGitHubAuthStatus(string output)
     {
-        foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var line in output.Split(
+            ['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             // A failed sign-in also names the account ("Failed to log in to github.com account NAME"),
             // and a failing gh folds that onto stderr, which is now part of the output.

@@ -124,7 +124,12 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
     public async Task<UnitState> ReadStateAsync(string distro, IdentityProfile profile, CancellationToken cancellationToken)
     {
         var result = await RunUserManagerScriptAsync(distro, profile, $"systemctl --user show -p ActiveState,UnitFileState --value {UnitName}", cancellationToken);
-        if (!result.Succeeded) return result.TimedOut ? UnitState.Unknown with { Unreachable = true } : UnitState.Unknown;
+        if (!result.Succeeded)
+        {
+            return result.TimedOut
+                ? UnitState.Unknown with { Unreachable = true }
+                : UnitState.Unknown;
+        }
 
         // The empties are kept on purpose. A unit that does not exist has an empty second line, and
         // dropping it would make "never installed" and "installed but stopped" look identical.
@@ -136,7 +141,8 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
         return new UnitState(
             Installed: fileState.Length > 0 && !string.Equals(fileState, "not-found", StringComparison.Ordinal),
             Enabled: string.Equals(fileState, "enabled", StringComparison.Ordinal),
-            Active: string.Equals(activeState, "active", StringComparison.Ordinal) || string.Equals(activeState, "activating", StringComparison.Ordinal));
+            Active: string.Equals(activeState, "active", StringComparison.Ordinal)
+                || string.Equals(activeState, "activating", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -155,7 +161,11 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
 
         foreach (var file in files)
         {
-            var written = await wsl.RunScriptAsync(distro, profile.LinuxUser, WslDistro.BuildFileWriteScript(file.Path, file.Content, file.Mode), cancellationToken);
+            var written = await wsl.RunScriptAsync(
+                distro,
+                profile.LinuxUser,
+                WslDistro.BuildFileWriteScript(file.Path, file.Content, file.Mode),
+                cancellationToken);
             if (!written.Succeeded)
             {
                 _logger.LogError("Could not write {Path} for profile {User}. {Output}", file.Path, profile.LinuxUser, written.Output);
@@ -233,7 +243,8 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
     /// </summary>
     public async Task StandAsideOtherProfilesAsync(string distro, IdentityProfile active, IReadOnlyList<IdentityProfile> profiles, CancellationToken cancellationToken)
     {
-        foreach (var other in profiles.Where(profile => !string.Equals(profile.LinuxUser, active.LinuxUser, StringComparison.Ordinal)))
+        foreach (var other in profiles.Where(
+            profile => !string.Equals(profile.LinuxUser, active.LinuxUser, StringComparison.Ordinal)))
         {
             if (!IdentityProfile.IsValidLinuxUser(other.LinuxUser)) continue;
 
@@ -323,7 +334,11 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
 
         foreach (var file in files)
         {
-            var written = await wsl.RunScriptAsync(distro, profile.LinuxUser, WslDistro.BuildFileWriteScript(file.Path, file.Content, file.Mode), cancellationToken);
+            var written = await wsl.RunScriptAsync(
+                distro,
+                profile.LinuxUser,
+                WslDistro.BuildFileWriteScript(file.Path, file.Content, file.Mode),
+                cancellationToken);
             if (!written.Succeeded)
             {
                 _logger.LogError("Could not write {Path} for profile {User}. {Output}", file.Path, profile.LinuxUser, written.Output);
@@ -392,7 +407,11 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
     {
         if (string.IsNullOrWhiteSpace(settings.Token))
         {
-            var removed = await wsl.RunScriptAsync(distro, profile.LinuxUser, BuildEnvironmentRemoveScript(profile), cancellationToken);
+            var removed = await wsl.RunScriptAsync(
+                distro,
+                profile.LinuxUser,
+                BuildEnvironmentRemoveScript(profile),
+                cancellationToken);
             if (!removed.Succeeded)
             {
                 _logger.LogError("Could not remove the daemon's token file for profile {User}. {Output}", profile.LinuxUser, removed.Output);
@@ -402,7 +421,12 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
             return true;
         }
 
-        var written = await wsl.RunScriptWithInputAsync(distro, profile.LinuxUser, BuildEnvironmentWriteScript(profile), $"{WslDistro.ServerTokenVariable}={settings.Token.Trim()}\n", cancellationToken);
+        var written = await wsl.RunScriptWithInputAsync(
+            distro,
+            profile.LinuxUser,
+            BuildEnvironmentWriteScript(profile),
+            $"{WslDistro.ServerTokenVariable}={settings.Token.Trim()}\n",
+            cancellationToken);
         if (!written.Succeeded)
         {
             _logger.LogError("Could not write the daemon's token file for profile {User}. {Output}", profile.LinuxUser, written.Output);

@@ -68,7 +68,8 @@ public partial class App : Application
         UpdateTrayCommandAvailability(_supervisor.State);
         SetAutostartMenuChecked();
 
-        if (services.GetRequiredService<MainWindow>() is { } mainWindow && services.GetRequiredService<IMainWindowViewModel>() is { } mainViewModel)
+        if (services.GetRequiredService<MainWindow>() is { } mainWindow
+            && services.GetRequiredService<IMainWindowViewModel>() is { } mainViewModel)
         {
             _mainWindow = mainWindow;
             _mainViewModel = mainViewModel;
@@ -86,7 +87,12 @@ public partial class App : Application
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(pollSeconds) };
         _timer.Tick += async (_, _) => await _supervisor.PollAsync();
         _timer.Start();
-        _logger.LogInformation("QwenTray tray ready. Distro={Distro} Profile={Profile} HealthUri={HealthUri} PollSeconds={PollSeconds}", _settings.WslDistroName, _settings.ResolveActiveProfile().Name, _settings.HealthUri, pollSeconds);
+        _logger.LogInformation(
+            "QwenTray tray ready. Distro={Distro} Profile={Profile} HealthUri={HealthUri} PollSeconds={PollSeconds}",
+            _settings.WslDistroName,
+            _settings.ResolveActiveProfile().Name,
+            _settings.HealthUri,
+            pollSeconds);
         _ = StartDaemonOnStartupAsync();
 
         if (_settings.CheckForUpdates)
@@ -399,13 +405,17 @@ public partial class App : Application
 
     private void SetMenuEnabled(string header, bool enabled)
     {
-        var item = _icon?.Menu?.Items.OfType<NativeMenuItem>().FirstOrDefault(x => x.Header?.ToString() == header);
-        if (item is not null) item.IsEnabled = enabled;
+        var item = _icon?.Menu?.Items
+            .OfType<NativeMenuItem>()
+            .FirstOrDefault(x => x.Header?.ToString() == header);
+        item?.IsEnabled = enabled;
     }
 
     private void SetAutostartMenuChecked()
     {
-        var item = _icon?.Menu?.Items.OfType<NativeMenuItem>().FirstOrDefault(x => x.Header?.ToString() == "Start with Windows");
+        var item = _icon?.Menu?.Items
+            .OfType<NativeMenuItem>()
+            .FirstOrDefault(x => x.Header?.ToString() == "Start with Windows");
         item?.IsChecked = _autostart.IsEnabled();
     }
 

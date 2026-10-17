@@ -168,7 +168,9 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     private void AddProfile()
     {
         var name = string.IsNullOrWhiteSpace(NewProfileName) ? $"Profile {Profiles.Count + 1}" : NewProfileName.Trim();
-        var user = string.IsNullOrWhiteSpace(NewProfileUser) ? IdentityProfile.SlugifyLinuxUser(name) : NewProfileUser.Trim().ToLowerInvariant();
+        var user = string.IsNullOrWhiteSpace(NewProfileUser)
+            ? IdentityProfile.SlugifyLinuxUser(name)
+            : NewProfileUser.Trim().ToLowerInvariant();
         if (!IdentityProfile.IsValidLinuxUser(user))
         {
             _save.ReportError($"\"{user}\" is not a valid Linux user name. Use lowercase letters, digits, underscore, or hyphen, and start with a letter.");
@@ -181,7 +183,10 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         }
 
         var id = IdentityProfile.SlugifyLinuxUser(name);
-        if (Profiles.Any(profile => string.Equals(profile.Id, id, StringComparison.Ordinal))) id = $"{id}-{Profiles.Count + 1}";
+        if (Profiles.Any(profile => string.Equals(profile.Id, id, StringComparison.Ordinal)))
+        {
+            id = $"{id}-{Profiles.Count + 1}";
+        }
         var created = new IdentityProfile { Id = id, Name = name, LinuxUser = user, WorkspaceDirectory = $"/home/{user}/workspace" };
         Profiles.Add(created);
         SelectedProfile = created;
@@ -204,7 +209,9 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         }
 
         var name = string.IsNullOrWhiteSpace(NewProfileName) ? $"{source.Name} copy" : NewProfileName.Trim();
-        var user = string.IsNullOrWhiteSpace(NewProfileUser) ? IdentityProfile.SlugifyLinuxUser(name) : NewProfileUser.Trim().ToLowerInvariant();
+        var user = string.IsNullOrWhiteSpace(NewProfileUser)
+            ? IdentityProfile.SlugifyLinuxUser(name)
+            : NewProfileUser.Trim().ToLowerInvariant();
         if (!IdentityProfile.IsValidLinuxUser(user))
         {
             _save.ReportError($"\"{user}\" is not a valid Linux user name. Use lowercase letters, digits, underscore, or hyphen, and start with a letter.");
@@ -217,7 +224,10 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         }
 
         var id = IdentityProfile.SlugifyLinuxUser(name);
-        if (Profiles.Any(profile => string.Equals(profile.Id, id, StringComparison.Ordinal))) id = $"{id}-{Profiles.Count + 1}";
+        if (Profiles.Any(profile => string.Equals(profile.Id, id, StringComparison.Ordinal)))
+        {
+            id = $"{id}-{Profiles.Count + 1}";
+        }
         var created = new IdentityProfile { Id = id, Name = name, LinuxUser = user, WorkspaceDirectory = $"/home/{user}/workspace" };
         Profiles.Add(created);
         SelectedProfile = created;
@@ -456,7 +466,8 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
 
     private static async Task<bool> CopyToClipboardAsync(string text)
     {
-        var clipboard = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow?.Clipboard;
+        var clipboard = (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)
+            ?.MainWindow?.Clipboard;
         if (clipboard is null) return false;
         await clipboard.SetTextAsync(text);
         return true;
@@ -550,7 +561,10 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     private void LoadProfiles()
     {
         Profiles.Clear();
-        if (_settings.Profiles.Length == 0) _settings.Profiles = [Settings.CreateDefaultProfile()];
+        if (_settings.Profiles.Length == 0)
+        {
+            _settings.Profiles = [Settings.CreateDefaultProfile()];
+        }
         foreach (var profile in _settings.Profiles) Profiles.Add(profile);
         SelectedProfile = _settings.ResolveActiveProfile();
     }
@@ -566,7 +580,10 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         var user = ProfileLinuxUser.Trim().ToLowerInvariant();
         if (name.Length > 0) SelectedProfile.Name = name;
         if (user.Length > 0) SelectedProfile.LinuxUser = user;
-        if (ProfileWorkspace.Trim().Length > 0) SelectedProfile.WorkspaceDirectory = ProfileWorkspace.Trim();
+        if (ProfileWorkspace.Trim().Length > 0)
+        {
+            SelectedProfile.WorkspaceDirectory = ProfileWorkspace.Trim();
+        }
         // Clearing the field restores the default email, so it is assigned even when empty.
         SelectedProfile.Email = ProfileEmail.Trim();
         SelectedProfile.GpgName = ProfileGpgName.Trim();
