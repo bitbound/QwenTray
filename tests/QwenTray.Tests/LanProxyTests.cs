@@ -82,7 +82,7 @@ public sealed class LanProxyTests
     public void AWildcardBindAlreadyExposesTheDaemonAndTheExposureSaysSo()
     {
         // A warning rather than an error, because the combination is not invalid. It just adds nothing, and
-        // the wildcard bind is the setting that breaks Live Voice.
+        // the wildcard bind is what already does the exposure's job.
         var warnings = DaemonSupervisor.ValidateSettings(new Settings { LanProxy = true, Host = "0.0.0.0", Port = 4170, LanProxyPort = 4171 }).ToList();
 
         Assert.Contains(warnings, warning => warning.Contains("127.0.0.1", StringComparison.Ordinal));

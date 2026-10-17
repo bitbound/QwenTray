@@ -267,8 +267,8 @@ public sealed class SystemdUserService(IWslDistro wsl, ILogger<SystemdUserServic
     }
 
     /// <summary>
-    /// The forwarding half. It dials the daemon's own loopback port, which is what its Live Voice discovery
-    /// record needs, and this is what makes that daemon reachable without it binding the network itself.
+    /// The forwarding half. It dials the daemon's own loopback port, so the daemon keeps its loopback
+    /// address, and this unit is what makes that daemon reachable without it binding the network itself.
     /// </summary>
     internal static string BuildProxyUnitContent(Settings settings)
     {

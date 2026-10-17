@@ -564,7 +564,7 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (settings.LocalControl && settings.ExtraArgs.Any(argument => string.Equals(argument, "--local-control", StringComparison.Ordinal))) yield return "Remove --local-control from extra arguments because the setting already enables it.";
         if (settings.LanProxy && settings.LanProxyPort is < 1 or > 65535) yield return "The LAN exposure port must be a number between 1 and 65535.";
         if (settings.LanProxy && settings.LanProxyPort == settings.Port) yield return "The LAN exposure port matches the daemon's port, so the forwarder could never bind it.";
-        if (settings.LanProxy && !IsLoopbackHost(settings.Host)) yield return "The LAN exposure expects the daemon address to be 127.0.0.1. A wildcard bind already exposes the daemon, and it is what breaks Live Voice.";
+        if (settings.LanProxy && !IsLoopbackHost(settings.Host)) yield return "The LAN exposure expects the daemon address to be 127.0.0.1. A wildcard bind already exposes the daemon, so the forwarder would add nothing.";
         if (settings.RequireAuth && string.IsNullOrWhiteSpace(settings.Token)) yield return "Require auth is set without a token; the daemon only fails fast on a loopback bind.";
         var hasCert = !string.IsNullOrWhiteSpace(settings.TlsCertPath);
         var hasKey = !string.IsNullOrWhiteSpace(settings.TlsKeyPath);

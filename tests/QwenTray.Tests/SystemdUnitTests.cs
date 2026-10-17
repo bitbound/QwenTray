@@ -257,8 +257,8 @@ public sealed class SystemdUnitTests
         Assert.Contains("ListenStream=0.0.0.0:4171", socket, StringComparison.Ordinal);
         Assert.Contains("WantedBy=sockets.target", socket, StringComparison.Ordinal);
 
-        // The forward target is the daemon's own loopback port, which is what keeps its discovery record a
-        // loopback URL and Live Voice working.
+        // The forward target is the daemon's own loopback port, which is what keeps the daemon bound to
+        // loopback and its address stable for whatever points at it.
         Assert.Contains($"ExecStart={SystemdUserService.SocketProxyPath} 127.0.0.1:4170", unit, StringComparison.Ordinal);
         Assert.Contains($"Requires={SystemdUserService.ProxySocketUnitName}", unit, StringComparison.Ordinal);
         Assert.Contains($"Requires={SystemdUserService.UnitName}", unit, StringComparison.Ordinal);
