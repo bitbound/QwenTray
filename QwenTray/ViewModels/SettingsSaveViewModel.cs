@@ -98,10 +98,16 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         if (_autostart.IsEnabled() != settingsPage.StartOnLogin)
         {
             _autostart.SetEnabled(settingsPage.StartOnLogin);
-            _logger.LogInformation("Start with Windows {State}.", settingsPage.StartOnLogin ? "enabled" : "disabled");
+            _logger.LogInformation(
+                "Start with Windows {State}.",
+                settingsPage.StartOnLogin ? "enabled" : "disabled");
         }
 
-        _logger.LogInformation("Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl} LanProxy={LanProxy}.", DaemonSupervisor.BuildServeArguments(_settings, _settings.ResolveActiveProfile()).Count, _settings.LocalControl, _settings.LanProxy);
+        _logger.LogInformation(
+            "Settings saved. Daemon argument count={ArgumentCount} LocalControl={LocalControl} LanProxy={LanProxy}.",
+            DaemonSupervisor.BuildServeArguments(_settings, _settings.ResolveActiveProfile()).Count,
+            _settings.LocalControl,
+            _settings.LanProxy);
 
         var warnings = DaemonSupervisor.ValidateSettings(_settings).ToList();
         foreach (var warning in warnings)
@@ -148,7 +154,8 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
             return "Hostname cannot be empty.";
         }
 
-        if (server.LocalControl && !string.Equals(server.Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        if (server.LocalControl
+            && !string.Equals(server.Host.Trim(), "127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
             return "Device pairing requires the main address to be 127.0.0.1. Change the address or turn off device pairing.";
         }
@@ -195,7 +202,9 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
             return $"The \"{unsafeProfile.Name}\" profile has a Linux user, workspace, signing key name or email, or qwen path that is not allowed. Use a lowercase user name, a plain absolute path, a plain email address, and a key name without quotes or shell characters.";
         }
 
-        var duplicate = identity.Profiles.GroupBy(profile => profile.LinuxUser, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
+        var duplicate = identity.Profiles
+            .GroupBy(profile => profile.LinuxUser, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1);
         if (duplicate is not null)
         {
             return $"Two profiles both use the Linux user \"{duplicate.Key}\". Each identity needs its own user.";
@@ -242,7 +251,8 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
     private void ScheduleSaveMessageFadeOut()
     {
         _saveMessageFadeOut?.Cancel();
-        var fadeOut = _saveMessageFadeOut = new CancellationTokenSource();
+        var fadeOut = new CancellationTokenSource();
+        _saveMessageFadeOut = fadeOut;
         SaveMessageOpacity = 1d;
         _ = FadeOutSaveMessageAsync(fadeOut.Token);
     }
@@ -261,7 +271,12 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         }
     }
 
-    private static int ParseInt(string? text, int fallback) => int.TryParse((text ?? string.Empty).Trim(), out var value) ? value : fallback;
+    private static int ParseInt(string? text, int fallback)
+    {
+        return int.TryParse((text ?? string.Empty).Trim(), out var value)
+            ? value
+            : fallback;
+    }
 
     private static string[] SplitLines(string? text) =>
         (text ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

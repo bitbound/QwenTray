@@ -363,7 +363,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         _logPath = null;
         _daemonProcessId = null;
         var serveArguments = BuildServeArguments(_settings, profile);
-        foreach (var warning in ValidateSettings(_settings)) _logger.LogWarning("Daemon settings warning: {Warning}", warning);
+        foreach (var warning in ValidateSettings(_settings))
+        {
+            _logger.LogWarning("Daemon settings warning: {Warning}", warning);
+        }
         SetLocalControlPairingUrl(null);
         _localControlEnableAttempted = false;
 
@@ -467,7 +470,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             PublishState();
             // systemd answers for the process, so the id is read once when the daemon becomes healthy
             // rather than on every poll.
-            if (!wasRunning) await RefreshDaemonProcessIdAsync(_settings.ResolveActiveProfile(), _shutdown.Token);
+            if (!wasRunning)
+            {
+                await RefreshDaemonProcessIdAsync(_settings.ResolveActiveProfile(), _shutdown.Token);
+            }
             await RefreshLocalControlPairingAsync(_shutdown.Token);
         }
         else if (State is DaemonState.Starting or DaemonState.Running)
@@ -482,7 +488,10 @@ public sealed class DaemonSupervisor : IAsyncDisposable
                 return;
             }
 
-            if (State == DaemonState.Running) _logger.LogWarning("Health check FAILED at {HealthUri}; daemon stopped responding.", _settings.HealthUri);
+            if (State == DaemonState.Running)
+            {
+                _logger.LogWarning("Health check FAILED at {HealthUri}; daemon stopped responding.", _settings.HealthUri);
+            }
             _machine.HealthFailed();
             PublishState();
         }
@@ -559,9 +568,21 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (!settings.ResolveActiveProfile().IsShellSafe) yield return "The active profile's Linux user or directory holds characters that are not allowed.";
         if (settings.LocalControl && !IsLoopbackHost(settings.Host)) yield return "Device pairing requires the main daemon address to be 127.0.0.1.";
         if (settings.LocalControl && !settings.ServeWeb) yield return "Device pairing requires the Web Shell to be enabled.";
-        if (settings.LocalControl && settings.ExtraArgs.Any(argument => argument.StartsWith("--hostname", StringComparison.Ordinal))) yield return "Remove the --hostname override from extra arguments to enable device pairing.";
-        if (settings.LocalControl && settings.ExtraArgs.Any(argument => string.Equals(argument, "--no-web", StringComparison.Ordinal))) yield return "Remove --no-web from extra arguments to enable device pairing.";
-        if (settings.LocalControl && settings.ExtraArgs.Any(argument => string.Equals(argument, "--local-control", StringComparison.Ordinal))) yield return "Remove --local-control from extra arguments because the setting already enables it.";
+        if (settings.LocalControl
+            && settings.ExtraArgs.Any(argument => argument.StartsWith("--hostname", StringComparison.Ordinal)))
+        {
+            yield return "Remove the --hostname override from extra arguments to enable device pairing.";
+        }
+        if (settings.LocalControl
+            && settings.ExtraArgs.Any(argument => string.Equals(argument, "--no-web", StringComparison.Ordinal)))
+        {
+            yield return "Remove --no-web from extra arguments to enable device pairing.";
+        }
+        if (settings.LocalControl
+            && settings.ExtraArgs.Any(argument => string.Equals(argument, "--local-control", StringComparison.Ordinal)))
+        {
+            yield return "Remove --local-control from extra arguments because the setting already enables it.";
+        }
         if (settings.LanProxy && settings.LanProxyPort is < 1 or > 65535) yield return "The LAN exposure port must be a number between 1 and 65535.";
         if (settings.LanProxy && settings.LanProxyPort == settings.Port) yield return "The LAN exposure port matches the daemon's port, so the forwarder could never bind it.";
         if (settings.LanProxy && !IsLoopbackHost(settings.Host)) yield return "The LAN exposure expects the daemon address to be 127.0.0.1. A wildcard bind already exposes the daemon, so the forwarder would add nothing.";
