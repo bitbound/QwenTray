@@ -100,7 +100,7 @@ internal static class Program
         services.AddSingleton<IWslDistro>(provider => provider.GetRequiredService<WslDistro>());
         services.AddSingleton<WslDistroProvisioner>();
         services.AddSingleton<IdentityService>();
-        services.AddSingleton<IBackupHold, BackupHold>();
+        services.AddSingleton<IDistroHold, DistroHold>();
         services.AddSingleton<IQwenConfigArchive, QwenConfigArchive>();
         services.AddSingleton<IQwenConfigArchiveService, QwenConfigArchiveService>();
         services.AddSingleton<BackupBundle>();

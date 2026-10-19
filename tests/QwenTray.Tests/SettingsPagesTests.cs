@@ -30,7 +30,7 @@ internal sealed class SettingsPages
         var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
         Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
-        Hold = new BackupHold();
+        Hold = new DistroHold();
         var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
         Environment = new EnvironmentViewModel(
             Settings, store, supervisor, wsl, provisioner,
@@ -62,7 +62,7 @@ internal sealed class SettingsPages
     public SettingsSaveViewModel Save { get; }
 
     /// <summary>The one hold the pages share, so a test can raise it the way a running backup does.</summary>
-    public BackupHold Hold { get; }
+    public DistroHold Hold { get; }
 
     public EnvironmentViewModel Environment { get; }
 
@@ -476,7 +476,7 @@ public sealed class IdentityPageTests
 public sealed class SettingsPageBusyGateTests
 {
     [Fact]
-    public void ABackupDisablesEveryPageThatWorksInsideTheDistro()
+    public void AHeldDistroDisablesEveryPageThatWorksInsideIt()
     {
         var pages = new SettingsPages();
         pages.PrimeProfiles();
@@ -486,6 +486,8 @@ public sealed class SettingsPageBusyGateTests
         Assert.True(pages.Backup.CanArchiveConfig);
         Assert.True(pages.Backup.CanImportBundle);
         Assert.True(pages.Server.CanCheckQwen);
+        Assert.True(pages.Environment.CanSetupDistro);
+        Assert.True(pages.Environment.DevTools[0].InstallCommand.CanExecute(null));
 
         pages.Hold.IsHeld = true;
 
@@ -494,6 +496,24 @@ public sealed class SettingsPageBusyGateTests
         Assert.False(pages.Backup.CanArchiveConfig);
         Assert.False(pages.Backup.CanImportBundle);
         Assert.False(pages.Server.CanCheckQwen);
+        Assert.False(pages.Environment.CanSetupDistro);
+        Assert.False(pages.Environment.CanCheckDistro);
+        Assert.False(pages.Environment.DevTools[0].InstallCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task AToolInstallHandsTheHoldBackWhenItFinishes()
+    {
+        // An install takes the same hold a backup does, so the two cannot overlap. A hold left raised
+        // after it finished would freeze every one of those buttons for the rest of the session.
+        var pages = new SettingsPages();
+        pages.PrimeProfiles();
+
+        await pages.Environment.DevTools[0].InstallCommand.ExecuteAsync(null);
+
+        Assert.False(pages.Hold.IsHeld);
+        Assert.True(pages.Environment.CanSetupDistro);
+        Assert.True(pages.Backup.CanArchiveConfig);
     }
 
     [Fact]

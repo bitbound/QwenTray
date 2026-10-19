@@ -18,7 +18,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     private readonly DaemonSupervisor _supervisor;
     private readonly WslDistroProvisioner _provisioner;
     private readonly IFirewallRuleService _firewall;
-    private readonly IBackupHold _hold;
+    private readonly IDistroHold _hold;
     private readonly IdentityViewModel _identity;
     private readonly SettingsSaveViewModel _save;
     private readonly ISnackbarService _snackbars;
@@ -119,7 +119,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         DaemonSupervisor supervisor,
         WslDistroProvisioner provisioner,
         IFirewallRuleService firewall,
-        IBackupHold hold,
+        IDistroHold hold,
         IdentityViewModel identity,
         SettingsSaveViewModel save,
         ISnackbarService snackbars,
@@ -140,7 +140,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         // A backup holds the distro from outside it, so the Qwen commands have to wait for it.
         _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(IBackupHold.IsHeld)) OnPropertyChanged(nameof(CanCheckQwen));
+            if (e.PropertyName == nameof(IDistroHold.IsHeld)) OnPropertyChanged(nameof(CanCheckQwen));
         };
 
         // The executable path belongs to the active profile, so following the selection keeps the field

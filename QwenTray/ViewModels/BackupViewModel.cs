@@ -14,7 +14,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
     private readonly DaemonSupervisor _supervisor;
     private readonly DistroBackupService _distroBackup;
     private readonly IQwenConfigArchiveService _archive;
-    private readonly IBackupHold _hold;
+    private readonly IDistroHold _hold;
     private readonly EnvironmentViewModel _environment;
     private readonly SettingsSaveViewModel _save;
     private readonly ISnackbarService _snackbars;
@@ -40,7 +40,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         DaemonSupervisor supervisor,
         DistroBackupService distroBackup,
         IQwenConfigArchiveService archive,
-        IBackupHold hold,
+        IDistroHold hold,
         EnvironmentViewModel environment,
         SettingsSaveViewModel save,
         ISnackbarService snackbars,
@@ -58,18 +58,15 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         _confirm = confirm;
         _logger = logger;
 
-        // Each command here works the distro, so each waits on the hold it shares with the pages that
-        // write into it, and a bundle needs a distro that exists before it can be written.
+        // Each command here works the distro as a whole, so each waits on the shared hold that every
+        // command taking the distro raises. Only the distro's existence comes from the environment page.
         _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(IBackupHold.IsHeld)) RaiseCommandGates();
+            if (e.PropertyName == nameof(IDistroHold.IsHeld)) RaiseCommandGates();
         };
         _environment.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(EnvironmentViewModel.IsDistroBusy) or nameof(EnvironmentViewModel.DistroExists))
-            {
-                RaiseCommandGates();
-            }
+            if (e.PropertyName == nameof(EnvironmentViewModel.DistroExists)) RaiseCommandGates();
         };
 
         // The shared save reads these fields even when the user never opened this page, so the singleton
@@ -82,9 +79,9 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
     /// <summary>The save footer this page hosts, shared with every other settings page.</summary>
     public SettingsSaveViewModel Save => _save;
 
-    public bool CanExportBundle => _environment.DistroExists && !_environment.IsDistroBusy && !_hold.IsHeld;
+    public bool CanExportBundle => _environment.DistroExists && !_hold.IsHeld;
 
-    public bool CanImportBundle => !_environment.IsDistroBusy && !_hold.IsHeld && !string.IsNullOrWhiteSpace(BundlePath);
+    public bool CanImportBundle => !_hold.IsHeld && !string.IsNullOrWhiteSpace(BundlePath);
 
     public bool CanArchiveConfig => !_hold.IsHeld;
 

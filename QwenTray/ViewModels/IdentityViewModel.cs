@@ -16,7 +16,7 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     private readonly Settings _settings;
     private readonly IdentityService _identity;
     private readonly WslDistroProvisioner _provisioner;
-    private readonly IBackupHold _hold;
+    private readonly IDistroHold _hold;
     private readonly SettingsSaveViewModel _save;
     private readonly ISnackbarService _snackbars;
     private readonly IConfirmDialogService _confirm;
@@ -85,7 +85,7 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         Settings settings,
         IdentityService identity,
         WslDistroProvisioner provisioner,
-        IBackupHold hold,
+        IDistroHold hold,
         SettingsSaveViewModel save,
         ISnackbarService snackbars,
         IConfirmDialogService confirm,
@@ -103,7 +103,7 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         // A backup holds the distro from outside it, so every command on this page has to wait for it.
         _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(IBackupHold.IsHeld)) return;
+            if (e.PropertyName != nameof(IDistroHold.IsHeld)) return;
             OnPropertyChanged(nameof(CanManageIdentity));
             OnPropertyChanged(nameof(CanManageGitHub));
         };

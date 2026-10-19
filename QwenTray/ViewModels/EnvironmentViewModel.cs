@@ -16,7 +16,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     private readonly IWslDistro _wsl;
     private readonly WslDistroProvisioner _provisioner;
     private readonly DevToolInstaller _devTools;
-    private readonly IBackupHold _hold;
+    private readonly IDistroHold _hold;
     private readonly ISnackbarService _snackbars;
     private readonly IConfirmDialogService _confirm;
     private readonly SettingsSaveViewModel _save;
@@ -93,7 +93,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         IWslDistro wsl,
         WslDistroProvisioner provisioner,
         DevToolInstaller devTools,
-        IBackupHold hold,
+        IDistroHold hold,
         ISnackbarService snackbars,
         IConfirmDialogService confirm,
         SettingsSaveViewModel save,
@@ -111,14 +111,16 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         _save = save;
         _logger = logger;
 
-        // A backup holds the distro from outside it, so nothing that writes into it may run alongside.
+        // Working the distro as a whole is exclusive, so a command that takes it holds it against every
+        // page that reads or writes inside it.
         _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(IBackupHold.IsHeld)) return;
+            if (e.PropertyName != nameof(IDistroHold.IsHeld)) return;
             OnPropertyChanged(nameof(CanSetupDistro));
             OnPropertyChanged(nameof(CanRebuildDistro));
             OnPropertyChanged(nameof(CanDeleteDistro));
             OnPropertyChanged(nameof(CanCheckDistro));
+            foreach (var tool in DevTools) tool.InstallCommand.NotifyCanExecuteChanged();
         };
 
         foreach (var tool in DevToolInstaller.Catalog)
@@ -143,7 +145,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
 
     public bool CanDeleteDistro => DistroExists && !IsDistroBusy && !_hold.IsHeld;
 
-    // Every command below reads or writes inside the distro, so each needs the same room a backup needs.
+    // Every command below reads or writes inside the distro, so each needs the room a hold gives it.
     public bool CanCheckDistro => !IsDistroBusy && !_hold.IsHeld;
 
     /// <summary>
@@ -193,8 +195,8 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
 
     private async Task RefreshEnvironmentAsync()
     {
-        // Opening the page probes inside the distro, which would boot it beside a running backup. The
-        // backup commands call this again once they are done, so nothing stays stale.
+        // Opening the page probes inside the distro, which would boot it beside a held one. The Backup
+        // page re-initializes this one once its command releases the hold, so nothing stays stale.
         if (_hold.IsHeld) return;
 
         await RefreshDistroAsync();
@@ -267,6 +269,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         }
 
         IsDistroBusy = true;
+        _hold.IsHeld = true;
         DistroProgress = rebuild
             ? "Deleting the old distro and building a new one, then installing Qwen and the gh CLI. This takes a few minutes."
             : "Creating the distro and installing Qwen and the gh CLI. This takes a few minutes on first run.";
@@ -306,6 +309,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
             DistroProgress = null;
             HasCheckedDistro = true;
             IsDistroBusy = false;
+            _hold.IsHeld = false;
         }
     }
 
@@ -324,6 +328,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         }
 
         IsDistroBusy = true;
+        _hold.IsHeld = true;
         try
         {
             // wsl refuses to unregister a running distro, and a daemon writing into a distro that is
@@ -344,6 +349,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         {
             HasCheckedDistro = true;
             IsDistroBusy = false;
+            _hold.IsHeld = false;
         }
     }
 
@@ -367,6 +373,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         }
 
         IsToolBusy = true;
+        _hold.IsHeld = true;
         ToolProgress = $"Installing {tool.Name} in the distro. This can take a few minutes.";
         try
         {
@@ -389,6 +396,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         {
             ToolProgress = null;
             IsToolBusy = false;
+            _hold.IsHeld = false;
         }
     }
 
