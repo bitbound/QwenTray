@@ -16,6 +16,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     private readonly IWslDistro _wsl;
     private readonly WslDistroProvisioner _provisioner;
     private readonly DevToolInstaller _devTools;
+    private readonly IBackupHold _hold;
     private readonly ISnackbarService _snackbars;
     private readonly IConfirmDialogService _confirm;
     private readonly SettingsSaveViewModel _save;
@@ -79,16 +80,6 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     [NotifyPropertyChangedFor(nameof(SetupDistroHelp))]
     private string? _distroProgress;
 
-    // A backup works the distro from the outside, so nothing that writes into it may run alongside. The
-    // identity and server pages read this flag too, since their commands also reach inside the distro.
-    // The Backup page raises it while one of its own commands holds the distro.
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanSetupDistro))]
-    [NotifyPropertyChangedFor(nameof(CanRebuildDistro))]
-    [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
-    [NotifyPropertyChangedFor(nameof(CanCheckDistro))]
-    private bool _isBackupBusy;
-
     [ObservableProperty]
     private bool _isToolBusy;
 
@@ -102,6 +93,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         IWslDistro wsl,
         WslDistroProvisioner provisioner,
         DevToolInstaller devTools,
+        IBackupHold hold,
         ISnackbarService snackbars,
         IConfirmDialogService confirm,
         SettingsSaveViewModel save,
@@ -113,14 +105,25 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         _wsl = wsl;
         _provisioner = provisioner;
         _devTools = devTools;
+        _hold = hold;
         _snackbars = snackbars;
         _confirm = confirm;
         _save = save;
         _logger = logger;
 
+        // A backup holds the distro from outside it, so nothing that writes into it may run alongside.
+        _hold.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(IBackupHold.IsHeld)) return;
+            OnPropertyChanged(nameof(CanSetupDistro));
+            OnPropertyChanged(nameof(CanRebuildDistro));
+            OnPropertyChanged(nameof(CanDeleteDistro));
+            OnPropertyChanged(nameof(CanCheckDistro));
+        };
+
         foreach (var tool in DevToolInstaller.Catalog)
         {
-            DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy && !IsBackupBusy));
+            DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy && !_hold.IsHeld));
         }
 
         // The shared save reads the distro name even when the user never opened this page, so the
@@ -134,14 +137,14 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
 
     public bool DistroNeedsAttention => HasCheckedDistro && !IsDistroProvisioned && !IsDistroBusy;
 
-    public bool CanSetupDistro => !IsDistroBusy && !IsBackupBusy;
+    public bool CanSetupDistro => !IsDistroBusy && !_hold.IsHeld;
 
-    public bool CanRebuildDistro => DistroExists && !IsDistroBusy && !IsBackupBusy;
+    public bool CanRebuildDistro => DistroExists && !IsDistroBusy && !_hold.IsHeld;
 
-    public bool CanDeleteDistro => DistroExists && !IsDistroBusy && !IsBackupBusy;
+    public bool CanDeleteDistro => DistroExists && !IsDistroBusy && !_hold.IsHeld;
 
     // Every command below reads or writes inside the distro, so each needs the same room a backup needs.
-    public bool CanCheckDistro => !IsDistroBusy && !IsBackupBusy;
+    public bool CanCheckDistro => !IsDistroBusy && !_hold.IsHeld;
 
     /// <summary>
     /// Re-running the setup on a distro that already exists is a repair, not a rebuild, so the label
@@ -192,7 +195,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     {
         // Opening the page probes inside the distro, which would boot it beside a running backup. The
         // backup commands call this again once they are done, so nothing stays stale.
-        if (IsBackupBusy) return;
+        if (_hold.IsHeld) return;
 
         await RefreshDistroAsync();
     }

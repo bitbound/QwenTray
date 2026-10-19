@@ -16,7 +16,7 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     private readonly Settings _settings;
     private readonly IdentityService _identity;
     private readonly WslDistroProvisioner _provisioner;
-    private readonly EnvironmentViewModel _environment;
+    private readonly IBackupHold _hold;
     private readonly SettingsSaveViewModel _save;
     private readonly ISnackbarService _snackbars;
     private readonly IConfirmDialogService _confirm;
@@ -85,7 +85,7 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         Settings settings,
         IdentityService identity,
         WslDistroProvisioner provisioner,
-        EnvironmentViewModel environment,
+        IBackupHold hold,
         SettingsSaveViewModel save,
         ISnackbarService snackbars,
         IConfirmDialogService confirm,
@@ -94,16 +94,16 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         _settings = settings;
         _identity = identity;
         _provisioner = provisioner;
-        _environment = environment;
+        _hold = hold;
         _save = save;
         _snackbars = snackbars;
         _confirm = confirm;
         _logger = logger;
 
         // A backup holds the distro from outside it, so every command on this page has to wait for it.
-        _environment.PropertyChanged += (_, e) =>
+        _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(EnvironmentViewModel.IsBackupBusy)) return;
+            if (e.PropertyName != nameof(IBackupHold.IsHeld)) return;
             OnPropertyChanged(nameof(CanManageIdentity));
             OnPropertyChanged(nameof(CanManageGitHub));
         };
@@ -113,9 +113,9 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         LoadProfiles();
     }
 
-    public bool CanManageIdentity => !IsIdentityBusy && !_environment.IsBackupBusy;
+    public bool CanManageIdentity => !IsIdentityBusy && !_hold.IsHeld;
 
-    public bool CanManageGitHub => !IsGitHubBusy && !_environment.IsBackupBusy;
+    public bool CanManageGitHub => !IsGitHubBusy && !_hold.IsHeld;
 
     public bool HasIdentityKeys => HasSshPublicKey || HasGpgPublicKey;
 
@@ -126,7 +126,7 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         LoadProfiles();
 
         // Reading the keys boots the distro, which a running backup would be doing something else with.
-        if (_environment.IsBackupBusy) return;
+        if (_hold.IsHeld) return;
 
         try
         {
@@ -554,7 +554,7 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         // The keys belong to the profile, so switching identities has to re-read them. The first switch
         // happens while the page is still loading, before the distro is known, and the refresh started
         // there covers it.
-        if (_distroProvisioned && !_environment.IsBackupBusy)
+        if (_distroProvisioned && !_hold.IsHeld)
         {
             _ = LoadIdentityCoreAsync(announce: false);
         }

@@ -14,6 +14,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
     private readonly DaemonSupervisor _supervisor;
     private readonly DistroBackupService _distroBackup;
     private readonly IQwenConfigArchiveService _archive;
+    private readonly IBackupHold _hold;
     private readonly EnvironmentViewModel _environment;
     private readonly SettingsSaveViewModel _save;
     private readonly ISnackbarService _snackbars;
@@ -34,17 +35,12 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
     [ObservableProperty]
     private string _configArchivePath = string.Empty;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanExportBundle))]
-    [NotifyPropertyChangedFor(nameof(CanImportBundle))]
-    [NotifyPropertyChangedFor(nameof(CanArchiveConfig))]
-    private bool _isBusy;
-
     public BackupViewModel(
         Settings settings,
         DaemonSupervisor supervisor,
         DistroBackupService distroBackup,
         IQwenConfigArchiveService archive,
+        IBackupHold hold,
         EnvironmentViewModel environment,
         SettingsSaveViewModel save,
         ISnackbarService snackbars,
@@ -55,26 +51,25 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         _supervisor = supervisor;
         _distroBackup = distroBackup;
         _archive = archive;
+        _hold = hold;
         _environment = environment;
         _save = save;
         _snackbars = snackbars;
         _confirm = confirm;
         _logger = logger;
 
-        // Every command here works the distro, so each waits on the environment page's state: the hold a
-        // bundle takes, and the distro existing at all before one is written.
+        // Each command here works the distro, so each waits on the hold it shares with the pages that
+        // write into it, and a bundle needs a distro that exists before it can be written.
+        _hold.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(IBackupHold.IsHeld)) RaiseCommandGates();
+        };
         _environment.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is not (nameof(EnvironmentViewModel.IsBackupBusy)
-                or nameof(EnvironmentViewModel.IsDistroBusy)
-                or nameof(EnvironmentViewModel.DistroExists)))
+            if (e.PropertyName is nameof(EnvironmentViewModel.IsDistroBusy) or nameof(EnvironmentViewModel.DistroExists))
             {
-                return;
+                RaiseCommandGates();
             }
-
-            OnPropertyChanged(nameof(CanExportBundle));
-            OnPropertyChanged(nameof(CanImportBundle));
-            OnPropertyChanged(nameof(CanArchiveConfig));
         };
 
         // The shared save reads these fields even when the user never opened this page, so the singleton
@@ -87,11 +82,18 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
     /// <summary>The save footer this page hosts, shared with every other settings page.</summary>
     public SettingsSaveViewModel Save => _save;
 
-    public bool CanExportBundle => _environment.DistroExists && !_environment.IsDistroBusy && !_environment.IsBackupBusy && !IsBusy;
+    public bool CanExportBundle => _environment.DistroExists && !_environment.IsDistroBusy && !_hold.IsHeld;
 
-    public bool CanImportBundle => !_environment.IsDistroBusy && !_environment.IsBackupBusy && !IsBusy && !string.IsNullOrWhiteSpace(BundlePath);
+    public bool CanImportBundle => !_environment.IsDistroBusy && !_hold.IsHeld && !string.IsNullOrWhiteSpace(BundlePath);
 
-    public bool CanArchiveConfig => !IsBusy && !_environment.IsBackupBusy;
+    public bool CanArchiveConfig => !_hold.IsHeld;
+
+    private void RaiseCommandGates()
+    {
+        OnPropertyChanged(nameof(CanExportBundle));
+        OnPropertyChanged(nameof(CanImportBundle));
+        OnPropertyChanged(nameof(CanArchiveConfig));
+    }
 
     protected override Task OnInitializeAsync()
     {
@@ -125,7 +127,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         }
 
         _settings.Profiles = _save.CommitProfilesForDistroWork();
-        _environment.IsBackupBusy = true;
+        _hold.IsHeld = true;
         BundleProgress = "Stopping the distro and writing its filesystem into the bundle. This takes a few minutes.";
         try
         {
@@ -142,7 +144,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         finally
         {
             BundleProgress = null;
-            _environment.IsBackupBusy = false;
+            _hold.IsHeld = false;
             await _environment.InitializeAsync();
         }
     }
@@ -184,7 +186,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
             return;
         }
 
-        _environment.IsBackupBusy = true;
+        _hold.IsHeld = true;
         BundleProgress = "Unpacking the bundle and registering the distro. This takes a few minutes.";
         try
         {
@@ -201,7 +203,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         finally
         {
             BundleProgress = null;
-            _environment.IsBackupBusy = false;
+            _hold.IsHeld = false;
             await _environment.InitializeAsync();
         }
     }
@@ -224,7 +226,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         }
 
         var profile = _settings.ResolveActiveProfile();
-        IsBusy = true;
+        _hold.IsHeld = true;
         try
         {
             var result = await _archive.ExportAsync(distro, profile, SplitLines(ConfigPaths), archivePath, CancellationToken.None);
@@ -241,7 +243,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         }
         finally
         {
-            IsBusy = false;
+            _hold.IsHeld = false;
         }
     }
 
@@ -267,7 +269,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         }
 
         var profile = _settings.ResolveActiveProfile();
-        IsBusy = true;
+        _hold.IsHeld = true;
         try
         {
             var manifest = await _archive.ProbeAsync(archivePath, CancellationToken.None);
@@ -290,7 +292,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         }
         finally
         {
-            IsBusy = false;
+            _hold.IsHeld = false;
         }
     }
 

@@ -30,23 +30,24 @@ internal sealed class SettingsPages
         var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
         Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
+        Hold = new BackupHold();
         var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
         Environment = new EnvironmentViewModel(
             Settings, store, supervisor, wsl, provisioner,
             new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance),
-            Snackbars, null!, Save, NullLogger<EnvironmentViewModel>.Instance);
+            Hold, Snackbars, null!, Save, NullLogger<EnvironmentViewModel>.Instance);
         Identity = new IdentityViewModel(
             Settings, new IdentityService(wsl, NullLogger<IdentityService>.Instance),
-            provisioner, Environment, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
+            provisioner, Hold, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
         Backup = new BackupViewModel(
             Settings, supervisor, distroBackup,
             new QwenConfigArchiveService(
                 new QwenConfigArchive(fileSystem), wsl,
                 new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)),
                 NullLogger<QwenConfigArchiveService>.Instance),
-            Environment, Save, Snackbars, null!, NullLogger<BackupViewModel>.Instance);
+            Hold, Environment, Save, Snackbars, null!, NullLogger<BackupViewModel>.Instance);
         Firewall = new FakeFirewallRules();
-        Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Environment, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
+        Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Hold, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
         Page = new SettingsViewModel(Settings, autostart, null!, null!, supervisor, null!, Snackbars, Save, NullLogger<SettingsViewModel>.Instance);
 
         _provider.Environment = Environment;
@@ -59,6 +60,9 @@ internal sealed class SettingsPages
     public Settings Settings { get; }
 
     public SettingsSaveViewModel Save { get; }
+
+    /// <summary>The one hold the pages share, so a test can raise it the way a running backup does.</summary>
+    public BackupHold Hold { get; }
 
     public EnvironmentViewModel Environment { get; }
 
@@ -483,7 +487,7 @@ public sealed class SettingsPageBusyGateTests
         Assert.True(pages.Backup.CanImportBundle);
         Assert.True(pages.Server.CanCheckQwen);
 
-        pages.Environment.IsBackupBusy = true;
+        pages.Hold.IsHeld = true;
 
         Assert.False(pages.Identity.CanManageIdentity);
         Assert.False(pages.Identity.CanManageGitHub);

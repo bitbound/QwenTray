@@ -18,7 +18,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     private readonly DaemonSupervisor _supervisor;
     private readonly WslDistroProvisioner _provisioner;
     private readonly IFirewallRuleService _firewall;
-    private readonly EnvironmentViewModel _environment;
+    private readonly IBackupHold _hold;
     private readonly IdentityViewModel _identity;
     private readonly SettingsSaveViewModel _save;
     private readonly ISnackbarService _snackbars;
@@ -119,7 +119,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         DaemonSupervisor supervisor,
         WslDistroProvisioner provisioner,
         IFirewallRuleService firewall,
-        EnvironmentViewModel environment,
+        IBackupHold hold,
         IdentityViewModel identity,
         SettingsSaveViewModel save,
         ISnackbarService snackbars,
@@ -129,7 +129,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         _supervisor = supervisor;
         _provisioner = provisioner;
         _firewall = firewall;
-        _environment = environment;
+        _hold = hold;
         _identity = identity;
         _save = save;
         _snackbars = snackbars;
@@ -138,9 +138,9 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         _supervisor.LocalControlPairingUrlChanged += OnLocalControlPairingUrlChanged;
 
         // A backup holds the distro from outside it, so the Qwen commands have to wait for it.
-        _environment.PropertyChanged += (_, e) =>
+        _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(EnvironmentViewModel.IsBackupBusy)) OnPropertyChanged(nameof(CanCheckQwen));
+            if (e.PropertyName == nameof(IBackupHold.IsHeld)) OnPropertyChanged(nameof(CanCheckQwen));
         };
 
         // The executable path belongs to the active profile, so following the selection keeps the field
@@ -156,7 +156,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         SeedFieldsFromSettings();
     }
 
-    public bool CanCheckQwen => !IsQwenBusy && !_environment.IsBackupBusy;
+    public bool CanCheckQwen => !IsQwenBusy && !_hold.IsHeld;
 
     protected override Task OnInitializeAsync()
     {
