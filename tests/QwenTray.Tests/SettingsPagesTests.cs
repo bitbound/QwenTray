@@ -169,7 +169,12 @@ public sealed class SettingsSaveTests
         await pages.InitializeAsync();
 
         pages.Environment.WslDistroName = "MyTray";
-        pages.Environment.BundlePath = @"D:\bundles\qwentray-20260101-120000.zip";
+        // Build the bundle path from the current OS's separator so the folder-extraction below behaves
+        // the same on Windows and Linux. The intent is that only the folder survives the save, which is
+        // OS-neutral; only the literal path flavor is not.
+        var bundleDir = System.OperatingSystem.IsWindows() ? @"D:\bundles" : "/bundles";
+        pages.Environment.BundlePath =
+            bundleDir + System.IO.Path.DirectorySeparatorChar + "qwentray-20260101-120000.zip";
         pages.Server.Host = "0.0.0.0";
         pages.Server.Port = "5199";
         pages.Server.Token = " bearer ";
@@ -197,7 +202,7 @@ public sealed class SettingsSaveTests
         var settings = pages.Settings;
         Assert.Equal("MyTray", settings.WslDistroName);
         // Only the folder is kept, because the file name is generated fresh for each export.
-        Assert.Equal(@"D:\bundles", settings.BundleDirectory);
+        Assert.Equal(bundleDir, settings.BundleDirectory);
         Assert.Equal("0.0.0.0", settings.Host);
         Assert.Equal(5199, settings.Port);
         Assert.Equal("bearer", settings.Token);
