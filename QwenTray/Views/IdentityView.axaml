@@ -208,34 +208,6 @@
           </StackPanel>
         </Border>
 
-        <Border Classes="Card">
-          <StackPanel Spacing="10">
-            <TextBlock Classes="h2" Text="Configuration sync" />
-
-            <TextBlock Classes="field" Text="Entries to sync" />
-            <TextBox Text="{Binding SyncEntries}"
-                     AcceptsReturn="True"
-                     TextWrapping="Wrap"
-                     MinHeight="70"
-                     MaxHeight="200"
-                     FontFamily="Consolas,Menlo,monospace" />
-            <TextBlock Classes="caption"
-                       TextWrapping="Wrap"
-                       Text="One entry per line, relative to ~/.qwen. settings.json and projects are never synced." />
-
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-              <Button Content="Push to distro"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding PushConfigCommand}"
-                      IsEnabled="{Binding CanSyncConfig}" />
-              <Button Content="Pull from distro"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding PullConfigCommand}"
-                      IsEnabled="{Binding CanSyncConfig}" />
-            </StackPanel>
-          </StackPanel>
-        </Border>
-
       </StackPanel>
     </ScrollViewer>
 

@@ -172,41 +172,6 @@
 
         <Border Classes="Card">
           <StackPanel Spacing="10">
-            <TextBlock Classes="h2" Text="Backup" />
-
-            <TextBlock Classes="caption"
-                       TextWrapping="Wrap"
-                       Text="One file carrying the whole distro together with this machine's QwenTray settings. An import protects those settings again for the account on the machine it lands on, so they travel unlocked and the bundle has to be kept somewhere private." />
-
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
-              <TextBlock Grid.Row="0" Classes="field" Text="Bundle file" />
-              <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
-                <TextBox Text="{Binding BundlePath}" />
-                <TextBlock Classes="caption"
-                           TextWrapping="Wrap"
-                           Text="Export writes to this path and refuses to overwrite a file that is already there. For an import, point it at a bundle made earlier." />
-              </StackPanel>
-            </Grid>
-
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-              <Button Content="Export bundle"
-                      Classes="Primary VariantFilled"
-                      Command="{Binding ExportBundleCommand}"
-                      IsEnabled="{Binding CanExportBundle}" />
-              <Button Content="Import bundle"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding ImportBundleCommand}"
-                      IsEnabled="{Binding CanImportBundle}" />
-            </StackPanel>
-
-            <TextBlock Classes="progress"
-                       Text="{Binding BackupProgress}"
-                       IsVisible="{Binding BackupProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          </StackPanel>
-        </Border>
-
-        <Border Classes="Card">
-          <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Developer tools" />
 
             <TextBlock Classes="caption"

@@ -30,20 +30,28 @@ internal sealed class SettingsPages
         var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
         Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
+        Hold = new DistroHold();
+        var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
         Environment = new EnvironmentViewModel(
             Settings, store, supervisor, wsl, provisioner,
             new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance),
-            new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance),
-            Snackbars, null!, Save, NullLogger<EnvironmentViewModel>.Instance);
+            Hold, Snackbars, null!, Save, NullLogger<EnvironmentViewModel>.Instance);
         Identity = new IdentityViewModel(
             Settings, new IdentityService(wsl, NullLogger<IdentityService>.Instance),
-            new WslConfigSyncService(fileSystem, wsl, NullLogger<WslConfigSyncService>.Instance),
-            provisioner, Environment, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
+            provisioner, Hold, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
+        Backup = new BackupViewModel(
+            Settings, supervisor, distroBackup,
+            new QwenConfigArchiveService(
+                new QwenConfigArchive(fileSystem), wsl,
+                new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)),
+                NullLogger<QwenConfigArchiveService>.Instance),
+            Hold, Environment, Save, Snackbars, null!, NullLogger<BackupViewModel>.Instance);
         Firewall = new FakeFirewallRules();
-        Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Environment, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
+        Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Hold, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
         Page = new SettingsViewModel(Settings, autostart, null!, null!, supervisor, null!, Snackbars, Save, NullLogger<SettingsViewModel>.Instance);
 
         _provider.Environment = Environment;
+        _provider.Backup = Backup;
         _provider.Identity = Identity;
         _provider.Server = Server;
         _provider.Settings = Page;
@@ -53,7 +61,12 @@ internal sealed class SettingsPages
 
     public SettingsSaveViewModel Save { get; }
 
+    /// <summary>The one hold the pages share, so a test can raise it the way a running backup does.</summary>
+    public DistroHold Hold { get; }
+
     public EnvironmentViewModel Environment { get; }
+
+    public BackupViewModel Backup { get; }
 
     public IdentityViewModel Identity { get; }
 
@@ -85,6 +98,7 @@ internal sealed class SettingsPages
     public async Task InitializeAsync()
     {
         await Environment.InitializeAsync();
+        await Backup.InitializeAsync();
         await Identity.InitializeAsync();
         await Server.InitializeAsync();
         await Page.InitializeAsync();
@@ -93,6 +107,8 @@ internal sealed class SettingsPages
     private sealed class PageProvider : IServiceProvider
     {
         public EnvironmentViewModel? Environment { get; set; }
+
+        public BackupViewModel? Backup { get; set; }
 
         public IdentityViewModel? Identity { get; set; }
 
@@ -103,6 +119,7 @@ internal sealed class SettingsPages
         public object? GetService(Type serviceType)
         {
             if (serviceType == typeof(EnvironmentViewModel)) return Environment;
+            if (serviceType == typeof(BackupViewModel)) return Backup;
             if (serviceType == typeof(IdentityViewModel)) return Identity;
             if (serviceType == typeof(ServerViewModel)) return Server;
             if (serviceType == typeof(SettingsViewModel)) return Settings;
@@ -173,7 +190,7 @@ public sealed class SettingsSaveTests
         // the same on Windows and Linux. The intent is that only the folder survives the save, which is
         // OS-neutral; only the literal path flavor is not.
         var bundleDir = System.OperatingSystem.IsWindows() ? @"D:\bundles" : "/bundles";
-        pages.Environment.BundlePath =
+        pages.Backup.BundlePath =
             bundleDir + System.IO.Path.DirectorySeparatorChar + "qwentray-20260101-120000.zip";
         pages.Server.Host = "0.0.0.0";
         pages.Server.Port = "5199";
@@ -191,7 +208,7 @@ public sealed class SettingsSaveTests
         pages.Server.DebugMode = true;
         pages.Server.ExtraArgs = "--verbose\n--log-level debug";
         pages.Server.QwenExecutable = "/opt/qwen/bin/qwen";
-        pages.Identity.SyncEntries = "QWEN.md\nagents";
+        pages.Backup.ConfigPaths = "/home/qwen/.qwen/QWEN.md\n/home/qwen/.qwen/agents";
         pages.Page.HealthPollSeconds = "12";
         pages.Page.AutoRestart = false;
         pages.Page.CheckForUpdates = false;
@@ -218,7 +235,7 @@ public sealed class SettingsSaveTests
         Assert.True(settings.RateLimit);
         Assert.True(settings.DebugMode);
         Assert.Equal(["--verbose", "--log-level debug"], settings.ExtraArgs);
-        Assert.Equal(["QWEN.md", "agents"], settings.SyncPaths);
+        Assert.Equal(["/home/qwen/.qwen/QWEN.md", "/home/qwen/.qwen/agents"], settings.ConfigBackupPaths);
         Assert.Equal(12, settings.HealthPollSeconds);
         Assert.False(settings.AutoRestart);
         Assert.False(settings.CheckForUpdates);
@@ -244,7 +261,7 @@ public sealed class SettingsSaveTests
             MaxSessions = 8,
             RateLimit = true,
             ExtraArgs = ["--verbose"],
-            SyncPaths = ["QWEN.md"],
+            ConfigBackupPaths = ["/home/qwen/.qwen/QWEN.md"],
             AutoRestart = true,
             CheckForUpdates = true,
             HealthPollSeconds = 12,
@@ -266,7 +283,7 @@ public sealed class SettingsSaveTests
         Assert.Equal(8, settings.MaxSessions);
         Assert.True(settings.RateLimit);
         Assert.Equal(["--verbose"], settings.ExtraArgs);
-        Assert.Equal(["QWEN.md"], settings.SyncPaths);
+        Assert.Equal(["/home/qwen/.qwen/QWEN.md"], settings.ConfigBackupPaths);
         Assert.True(settings.AutoRestart);
         Assert.True(settings.CheckForUpdates);
         Assert.Equal(12, settings.HealthPollSeconds);
@@ -464,22 +481,44 @@ public sealed class IdentityPageTests
 public sealed class SettingsPageBusyGateTests
 {
     [Fact]
-    public void ABackupDisablesEveryPageThatWorksInsideTheDistro()
+    public void AHeldDistroDisablesEveryPageThatWorksInsideIt()
     {
         var pages = new SettingsPages();
         pages.PrimeProfiles();
 
         Assert.True(pages.Identity.CanManageIdentity);
         Assert.True(pages.Identity.CanManageGitHub);
-        Assert.True(pages.Identity.CanSyncConfig);
+        Assert.True(pages.Backup.CanArchiveConfig);
+        Assert.True(pages.Backup.CanImportBundle);
         Assert.True(pages.Server.CanCheckQwen);
+        Assert.True(pages.Environment.CanSetupDistro);
+        Assert.True(pages.Environment.DevTools[0].InstallCommand.CanExecute(null));
 
-        pages.Environment.IsBackupBusy = true;
+        pages.Hold.IsHeld = true;
 
         Assert.False(pages.Identity.CanManageIdentity);
         Assert.False(pages.Identity.CanManageGitHub);
-        Assert.False(pages.Identity.CanSyncConfig);
+        Assert.False(pages.Backup.CanArchiveConfig);
+        Assert.False(pages.Backup.CanImportBundle);
         Assert.False(pages.Server.CanCheckQwen);
+        Assert.False(pages.Environment.CanSetupDistro);
+        Assert.False(pages.Environment.CanCheckDistro);
+        Assert.False(pages.Environment.DevTools[0].InstallCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task AToolInstallHandsTheHoldBackWhenItFinishes()
+    {
+        // An install takes the same hold a backup does, so the two cannot overlap. A hold left raised
+        // after it finished would freeze every one of those buttons for the rest of the session.
+        var pages = new SettingsPages();
+        pages.PrimeProfiles();
+
+        await pages.Environment.DevTools[0].InstallCommand.ExecuteAsync(null);
+
+        Assert.False(pages.Hold.IsHeld);
+        Assert.True(pages.Environment.CanSetupDistro);
+        Assert.True(pages.Backup.CanArchiveConfig);
     }
 
     [Fact]

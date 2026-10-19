@@ -6,8 +6,7 @@ using QwenTray.Views;
 namespace QwenTray.ViewModels;
 
 /// <summary>
-/// The Linux environment: the distro itself, the backup that moves it between machines, and the
-/// developer tools installed inside it.
+/// The Linux environment: the distro itself and the developer tools installed inside it.
 /// </summary>
 public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView>
 {
@@ -17,7 +16,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     private readonly IWslDistro _wsl;
     private readonly WslDistroProvisioner _provisioner;
     private readonly DevToolInstaller _devTools;
-    private readonly DistroBackupService _backup;
+    private readonly IDistroHold _hold;
     private readonly ISnackbarService _snackbars;
     private readonly IConfirmDialogService _confirm;
     private readonly SettingsSaveViewModel _save;
@@ -82,25 +81,6 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     private string? _distroProgress;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanExportBundle))]
-    [NotifyPropertyChangedFor(nameof(CanImportBundle))]
-    private string _bundlePath = string.Empty;
-
-    // A backup works the distro from the outside, so nothing that writes into it may run alongside. The
-    // identity and server pages read this flag too, since their commands also reach inside the distro.
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanSetupDistro))]
-    [NotifyPropertyChangedFor(nameof(CanRebuildDistro))]
-    [NotifyPropertyChangedFor(nameof(CanDeleteDistro))]
-    [NotifyPropertyChangedFor(nameof(CanExportBundle))]
-    [NotifyPropertyChangedFor(nameof(CanImportBundle))]
-    [NotifyPropertyChangedFor(nameof(CanCheckDistro))]
-    private bool _isBackupBusy;
-
-    [ObservableProperty]
-    private string? _backupProgress;
-
-    [ObservableProperty]
     private bool _isToolBusy;
 
     [ObservableProperty]
@@ -113,7 +93,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         IWslDistro wsl,
         WslDistroProvisioner provisioner,
         DevToolInstaller devTools,
-        DistroBackupService backup,
+        IDistroHold hold,
         ISnackbarService snackbars,
         IConfirmDialogService confirm,
         SettingsSaveViewModel save,
@@ -125,21 +105,32 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         _wsl = wsl;
         _provisioner = provisioner;
         _devTools = devTools;
-        _backup = backup;
+        _hold = hold;
         _snackbars = snackbars;
         _confirm = confirm;
         _save = save;
         _logger = logger;
 
+        // Working the distro as a whole is exclusive, so a command that takes it holds it against every
+        // page that reads or writes inside it.
+        _hold.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(IDistroHold.IsHeld)) return;
+            OnPropertyChanged(nameof(CanSetupDistro));
+            OnPropertyChanged(nameof(CanRebuildDistro));
+            OnPropertyChanged(nameof(CanDeleteDistro));
+            OnPropertyChanged(nameof(CanCheckDistro));
+            foreach (var tool in DevTools) tool.InstallCommand.NotifyCanExecuteChanged();
+        };
+
         foreach (var tool in DevToolInstaller.Catalog)
         {
-            DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy && !IsBackupBusy));
+            DevTools.Add(new DevToolRowViewModel(tool, InstallToolAsync, () => !IsToolBusy && !_hold.IsHeld));
         }
 
-        // The shared save reads the distro name and the bundle path even when the user never opened
-        // this page, so the singleton has to carry the stored values from construction.
+        // The shared save reads the distro name even when the user never opened this page, so the
+        // singleton has to carry the stored value from construction.
         WslDistroName = _settings.WslDistroName;
-        BundlePath = DistroBackupService.DefaultBundlePath(_settings.BundleDirectory);
     }
 
     public bool DistroIsChecking => !HasCheckedDistro || IsDistroBusy;
@@ -148,18 +139,14 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
 
     public bool DistroNeedsAttention => HasCheckedDistro && !IsDistroProvisioned && !IsDistroBusy;
 
-    public bool CanSetupDistro => !IsDistroBusy && !IsBackupBusy;
+    public bool CanSetupDistro => !IsDistroBusy && !_hold.IsHeld;
 
-    public bool CanRebuildDistro => DistroExists && !IsDistroBusy && !IsBackupBusy;
+    public bool CanRebuildDistro => DistroExists && !IsDistroBusy && !_hold.IsHeld;
 
-    public bool CanDeleteDistro => DistroExists && !IsDistroBusy && !IsBackupBusy;
+    public bool CanDeleteDistro => DistroExists && !IsDistroBusy && !_hold.IsHeld;
 
-    public bool CanExportBundle => DistroExists && !IsDistroBusy && !IsBackupBusy;
-
-    public bool CanImportBundle => !IsDistroBusy && !IsBackupBusy && !string.IsNullOrWhiteSpace(BundlePath);
-
-    // Every command below reads or writes inside the distro, so each needs the same room a backup needs.
-    public bool CanCheckDistro => !IsDistroBusy && !IsBackupBusy;
+    // Every command below reads or writes inside the distro, so each needs the room a hold gives it.
+    public bool CanCheckDistro => !IsDistroBusy && !_hold.IsHeld;
 
     /// <summary>
     /// Re-running the setup on a distro that already exists is a repair, not a rebuild, so the label
@@ -198,11 +185,6 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
     protected override Task OnInitializeAsync()
     {
         WslDistroName = _settings.WslDistroName;
-        // A typed path survives a revisit, while an emptied field gets a fresh name in the stored folder.
-        if (string.IsNullOrWhiteSpace(BundlePath))
-        {
-            BundlePath = DistroBackupService.DefaultBundlePath(_settings.BundleDirectory);
-        }
 
         // Surface the Linux environment state without waiting on wsl.exe, so the page opens instantly and
         // fills in as the distro answers.
@@ -213,9 +195,9 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
 
     private async Task RefreshEnvironmentAsync()
     {
-        // Opening the page probes inside the distro, which would boot it beside a running backup. The
-        // backup commands call this again once they are done, so nothing stays stale.
-        if (IsBackupBusy) return;
+        // Opening the page probes inside the distro, which would boot it beside a held one. The Backup
+        // page re-initializes this one once its command releases the hold, so nothing stays stale.
+        if (_hold.IsHeld) return;
 
         await RefreshDistroAsync();
     }
@@ -287,6 +269,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         }
 
         IsDistroBusy = true;
+        _hold.IsHeld = true;
         DistroProgress = rebuild
             ? "Deleting the old distro and building a new one, then installing Qwen and the gh CLI. This takes a few minutes."
             : "Creating the distro and installing Qwen and the gh CLI. This takes a few minutes on first run.";
@@ -326,6 +309,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
             DistroProgress = null;
             HasCheckedDistro = true;
             IsDistroBusy = false;
+            _hold.IsHeld = false;
         }
     }
 
@@ -344,6 +328,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         }
 
         IsDistroBusy = true;
+        _hold.IsHeld = true;
         try
         {
             // wsl refuses to unregister a running distro, and a daemon writing into a distro that is
@@ -364,102 +349,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         {
             HasCheckedDistro = true;
             IsDistroBusy = false;
-        }
-    }
-
-    /// <summary>
-    /// Writes the distro and this machine's settings into a bundle. Nothing is destroyed, but the distro
-    /// is stopped so its filesystem is not half-written into the archive, and it stays stopped.
-    /// </summary>
-    [RelayCommand]
-    private async Task ExportBundleAsync()
-    {
-        var path = BundlePath.Trim();
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            _snackbars.Show("Set a bundle path first.", SnackbarKind.Error);
-            return;
-        }
-
-        _settings.Profiles = _save.CommitProfilesForDistroWork();
-        IsBackupBusy = true;
-        BackupProgress = "Stopping the distro and writing its filesystem into the bundle. This takes a few minutes.";
-        try
-        {
-            await using var distroHold = await _supervisor.HoldAsync("exporting the bundle");
-            var result = await _backup.ExportAsync(path, CancellationToken.None);
-            DistroStatus = $"The \"{WslDistroName.Trim()}\" distro is set up and stopped by the export.";
-            _snackbars.Show($"Wrote {DistroBackupService.FormatBytes(result.BundleBytes)} to {result.BundlePath}. It holds live credentials, so keep it somewhere private.", SnackbarKind.Success);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Exporting the distro failed.");
-            _snackbars.Show($"Export failed: {ex.Message}", SnackbarKind.Error);
-        }
-        finally
-        {
-            BackupProgress = null;
-            IsBackupBusy = false;
-            await RefreshEnvironmentAsync();
-        }
-    }
-
-    /// <summary>
-    /// Registers the bundle's distro and adopts its settings. The bundle is read and checked before
-    /// anything is destroyed, so the prompt can name exactly what is about to be replaced.
-    /// </summary>
-    [RelayCommand]
-    private async Task ImportBundleAsync()
-    {
-        var path = BundlePath.Trim();
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            _snackbars.Show("Set a bundle path first.", SnackbarKind.Error);
-            return;
-        }
-
-        BundleContents contents;
-        try
-        {
-            contents = await _backup.ProbeAsync(path, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Reading the bundle failed.");
-            _snackbars.Show($"That bundle cannot be imported: {ex.Message}", SnackbarKind.Error);
-            return;
-        }
-
-        var distro = contents.Manifest.WslDistroName;
-        var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
-            $"Import the bundle made {contents.Manifest.CreatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm}?",
-            $"It registers the \"{distro}\" distro from the bundle and takes QwenTray's settings from it, including the bearer token and every profile. Settings are then protected for the Windows account on this machine.",
-            "Import",
-            $"A distro already named \"{distro}\" is unregistered first, taking its profiles' keys, GitHub sign-ins, workspaces, and Qwen configuration with it. The daemon is stopped."));
-        if (!confirmed)
-        {
-            return;
-        }
-
-        IsBackupBusy = true;
-        BackupProgress = "Unpacking the bundle and registering the distro. This takes a few minutes.";
-        try
-        {
-            await using var distroHold = await _supervisor.HoldAsync("importing the bundle");
-            var manifest = await _backup.ImportAsync(path, CancellationToken.None);
-            await InitializeAsync();
-            _snackbars.Show($"Imported the \"{manifest.WslDistroName}\" distro. Sign in to Windows again or run 'wsl --shutdown' so the mirrored networking change takes effect.", SnackbarKind.Success);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Importing the bundle failed.");
-            _snackbars.Show($"Import failed: {ex.Message}", SnackbarKind.Error);
-        }
-        finally
-        {
-            BackupProgress = null;
-            IsBackupBusy = false;
-            await RefreshEnvironmentAsync();
+            _hold.IsHeld = false;
         }
     }
 
@@ -483,6 +373,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         }
 
         IsToolBusy = true;
+        _hold.IsHeld = true;
         ToolProgress = $"Installing {tool.Name} in the distro. This can take a few minutes.";
         try
         {
@@ -505,6 +396,7 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         {
             ToolProgress = null;
             IsToolBusy = false;
+            _hold.IsHeld = false;
         }
     }
 

@@ -9,16 +9,14 @@ using QwenTray.Views;
 namespace QwenTray.ViewModels;
 
 /// <summary>
-/// The identity profiles, the credentials and keys that make each one distinct, and the configuration
-/// that syncs between this machine and the active profile's home directory.
+/// The identity profiles and the credentials and keys that make each one distinct.
 /// </summary>
 public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
 {
     private readonly Settings _settings;
     private readonly IdentityService _identity;
-    private readonly WslConfigSyncService _sync;
     private readonly WslDistroProvisioner _provisioner;
-    private readonly EnvironmentViewModel _environment;
+    private readonly IDistroHold _hold;
     private readonly SettingsSaveViewModel _save;
     private readonly ISnackbarService _snackbars;
     private readonly IConfirmDialogService _confirm;
@@ -83,19 +81,11 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     [NotifyPropertyChangedFor(nameof(CanManageIdentity))]
     private bool _isIdentityBusy;
 
-    [ObservableProperty]
-    private string _syncEntries = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanSyncConfig))]
-    private bool _isSyncing;
-
     public IdentityViewModel(
         Settings settings,
         IdentityService identity,
-        WslConfigSyncService sync,
         WslDistroProvisioner provisioner,
-        EnvironmentViewModel environment,
+        IDistroHold hold,
         SettingsSaveViewModel save,
         ISnackbarService snackbars,
         IConfirmDialogService confirm,
@@ -103,34 +93,29 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     {
         _settings = settings;
         _identity = identity;
-        _sync = sync;
         _provisioner = provisioner;
-        _environment = environment;
+        _hold = hold;
         _save = save;
         _snackbars = snackbars;
         _confirm = confirm;
         _logger = logger;
 
         // A backup holds the distro from outside it, so every command on this page has to wait for it.
-        _environment.PropertyChanged += (_, e) =>
+        _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(EnvironmentViewModel.IsBackupBusy)) return;
+            if (e.PropertyName != nameof(IDistroHold.IsHeld)) return;
             OnPropertyChanged(nameof(CanManageIdentity));
             OnPropertyChanged(nameof(CanManageGitHub));
-            OnPropertyChanged(nameof(CanSyncConfig));
         };
 
-        // The shared save reads the profile list and the sync entries even when the user never opened
-        // this page, so the singleton has to carry them from construction.
+        // The shared save reads the profile list even when the user never opened this page, so the
+        // singleton has to carry it from construction.
         LoadProfiles();
-        SyncEntries = string.Join(Environment.NewLine, EffectiveSyncPaths());
     }
 
-    public bool CanManageIdentity => !IsIdentityBusy && !_environment.IsBackupBusy;
+    public bool CanManageIdentity => !IsIdentityBusy && !_hold.IsHeld;
 
-    public bool CanManageGitHub => !IsGitHubBusy && !_environment.IsBackupBusy;
-
-    public bool CanSyncConfig => !IsSyncing && !_environment.IsBackupBusy;
+    public bool CanManageGitHub => !IsGitHubBusy && !_hold.IsHeld;
 
     public bool HasIdentityKeys => HasSshPublicKey || HasGpgPublicKey;
 
@@ -139,10 +124,9 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     protected override async Task OnInitializeAsync()
     {
         LoadProfiles();
-        SyncEntries = string.Join(Environment.NewLine, EffectiveSyncPaths());
 
         // Reading the keys boots the distro, which a running backup would be doing something else with.
-        if (_environment.IsBackupBusy) return;
+        if (_hold.IsHeld) return;
 
         try
         {
@@ -527,37 +511,6 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         }
     }
 
-    [RelayCommand]
-    private async Task PushConfigAsync() => await SyncConfigAsync(push: true);
-
-    [RelayCommand]
-    private async Task PullConfigAsync() => await SyncConfigAsync(push: false);
-
-    private async Task SyncConfigAsync(bool push)
-    {
-        var (distro, profile) = CurrentIdentityTarget();
-        if (distro is null) return;
-        var entries = SplitLines(SyncEntries);
-        IsSyncing = true;
-        try
-        {
-            var result = push
-                ? await _sync.PushAsync(distro, profile, entries, CancellationToken.None)
-                : await _sync.PullAsync(distro, profile, entries, CancellationToken.None);
-            var skipped = result.Skipped.Length > 0 ? $" Skipped: {string.Join(", ", result.Skipped)}." : string.Empty;
-            _snackbars.Show($"{(push ? "Pushed" : "Pulled")} {result.FilesCopied} file(s) {(push ? "to" : "from")} {profile.Name}.{skipped}", SnackbarKind.Success);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Syncing the Qwen configuration failed.");
-            _snackbars.Show($"Sync failed: {ex.Message}", SnackbarKind.Error);
-        }
-        finally
-        {
-            IsSyncing = false;
-        }
-    }
-
     private void LoadProfiles()
     {
         Profiles.Clear();
@@ -601,14 +554,9 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         // The keys belong to the profile, so switching identities has to re-read them. The first switch
         // happens while the page is still loading, before the distro is known, and the refresh started
         // there covers it.
-        if (_distroProvisioned && !_environment.IsBackupBusy)
+        if (_distroProvisioned && !_hold.IsHeld)
         {
             _ = LoadIdentityCoreAsync(announce: false);
         }
     }
-
-    private string[] EffectiveSyncPaths() => _settings.SyncPaths.Length > 0 ? _settings.SyncPaths : Settings.DefaultSyncPaths;
-
-    private static string[] SplitLines(string? text) =>
-        (text ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

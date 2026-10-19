@@ -4,7 +4,7 @@ QwenTray is a Windows tray app that supervises a single local Qwen Code daemon. 
 run on Windows. QwenTray creates a WSL2 Ubuntu distro, owns it, and runs the daemon inside it as a
 Linux user, under a systemd user service for that user. The tray icon and the app window drive the
 same daemon, and Settings covers the Linux environment, identity profiles, credentials, configuration
-sync, the daemon, and optional Local Control device pairing.
+backup, the daemon, and optional Local Control device pairing.
 
 The daemon belongs to systemd rather than to the tray, so it keeps serving when QwenTray exits,
 crashes, or is updated, and it comes back on its own when the distro starts. **Stop** is what takes it
@@ -81,15 +81,21 @@ The profile users are deliberately unprivileged and cannot use `sudo`. **Open ad
 the Daemon page gives you, the operator, a root shell in the distro for installing packages and
 editing its configuration, without granting the daemon those rights.
 
-## Configuration Sync
+## Backup
 
-**Push to distro** copies entries from `%USERPROFILE%\.qwen` on Windows into the active profile's
-`~/.qwen`. **Pull from distro** copies them back. The default entries are `QWEN.md`, `agents`,
-`rules`, `memories`, `skills`, and `workflows`. Edit the list to change what moves.
+Both backups live on the **Backup** page. Neither reads or writes the Windows `%USERPROFILE%\.qwen`
+folder.
 
-Two entries never sync, whatever the list says. `settings.json` holds live API keys and
-per-machine settings, and `projects` is keyed by absolute path. Sync moves files over the
-`\\wsl.localhost` share, so the distro has to be running.
+**WSL backup** exports the whole distro plus this machine's QwenTray settings into one bundle, and
+imports a bundle made earlier.
+
+**Configuration backup** writes a ZIP of the active profile's Qwen configuration from inside the distro.
+**Restore backup** writes those files back. The list holds absolute Linux paths, one per line, and
+defaults to `QWEN.md`, `agents`, `rules`, `memories`, `skills`, `workflows`, and `settings.json` under
+`~/.qwen`. A folder includes every file beneath it, and any path can be added or removed.
+
+Both move files over the `\\wsl.localhost` share, so the distro has to be running. `settings.json` is
+now inside the default list, so an archive carries live API keys. Keep it somewhere private.
 
 ## Code Signing
 
