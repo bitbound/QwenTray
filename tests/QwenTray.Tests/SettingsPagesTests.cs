@@ -30,23 +30,27 @@ internal sealed class SettingsPages
         var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
         Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
+        var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
         Environment = new EnvironmentViewModel(
             Settings, store, supervisor, wsl, provisioner,
             new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance),
-            new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance),
             Snackbars, null!, Save, NullLogger<EnvironmentViewModel>.Instance);
         Identity = new IdentityViewModel(
             Settings, new IdentityService(wsl, NullLogger<IdentityService>.Instance),
+            provisioner, Environment, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
+        Backup = new BackupViewModel(
+            Settings, supervisor, distroBackup,
             new QwenConfigArchiveService(
                 new QwenConfigArchive(fileSystem), wsl,
                 new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)),
                 NullLogger<QwenConfigArchiveService>.Instance),
-            provisioner, Environment, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
+            Environment, Save, Snackbars, null!, NullLogger<BackupViewModel>.Instance);
         Firewall = new FakeFirewallRules();
         Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Environment, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
         Page = new SettingsViewModel(Settings, autostart, null!, null!, supervisor, null!, Snackbars, Save, NullLogger<SettingsViewModel>.Instance);
 
         _provider.Environment = Environment;
+        _provider.Backup = Backup;
         _provider.Identity = Identity;
         _provider.Server = Server;
         _provider.Settings = Page;
@@ -57,6 +61,8 @@ internal sealed class SettingsPages
     public SettingsSaveViewModel Save { get; }
 
     public EnvironmentViewModel Environment { get; }
+
+    public BackupViewModel Backup { get; }
 
     public IdentityViewModel Identity { get; }
 
@@ -88,6 +94,7 @@ internal sealed class SettingsPages
     public async Task InitializeAsync()
     {
         await Environment.InitializeAsync();
+        await Backup.InitializeAsync();
         await Identity.InitializeAsync();
         await Server.InitializeAsync();
         await Page.InitializeAsync();
@@ -96,6 +103,8 @@ internal sealed class SettingsPages
     private sealed class PageProvider : IServiceProvider
     {
         public EnvironmentViewModel? Environment { get; set; }
+
+        public BackupViewModel? Backup { get; set; }
 
         public IdentityViewModel? Identity { get; set; }
 
@@ -106,6 +115,7 @@ internal sealed class SettingsPages
         public object? GetService(Type serviceType)
         {
             if (serviceType == typeof(EnvironmentViewModel)) return Environment;
+            if (serviceType == typeof(BackupViewModel)) return Backup;
             if (serviceType == typeof(IdentityViewModel)) return Identity;
             if (serviceType == typeof(ServerViewModel)) return Server;
             if (serviceType == typeof(SettingsViewModel)) return Settings;
@@ -172,7 +182,7 @@ public sealed class SettingsSaveTests
         await pages.InitializeAsync();
 
         pages.Environment.WslDistroName = "MyTray";
-        pages.Environment.BundlePath = @"D:\bundles\qwentray-20260101-120000.zip";
+        pages.Backup.BundlePath = @"D:\bundles\qwentray-20260101-120000.zip";
         pages.Server.Host = "0.0.0.0";
         pages.Server.Port = "5199";
         pages.Server.Token = " bearer ";
@@ -189,7 +199,7 @@ public sealed class SettingsSaveTests
         pages.Server.DebugMode = true;
         pages.Server.ExtraArgs = "--verbose\n--log-level debug";
         pages.Server.QwenExecutable = "/opt/qwen/bin/qwen";
-        pages.Identity.ConfigPaths = "/home/qwen/.qwen/QWEN.md\n/home/qwen/.qwen/agents";
+        pages.Backup.ConfigPaths = "/home/qwen/.qwen/QWEN.md\n/home/qwen/.qwen/agents";
         pages.Page.HealthPollSeconds = "12";
         pages.Page.AutoRestart = false;
         pages.Page.CheckForUpdates = false;
@@ -469,14 +479,16 @@ public sealed class SettingsPageBusyGateTests
 
         Assert.True(pages.Identity.CanManageIdentity);
         Assert.True(pages.Identity.CanManageGitHub);
-        Assert.True(pages.Identity.CanArchiveConfig);
+        Assert.True(pages.Backup.CanArchiveConfig);
+        Assert.True(pages.Backup.CanImportBundle);
         Assert.True(pages.Server.CanCheckQwen);
 
         pages.Environment.IsBackupBusy = true;
 
         Assert.False(pages.Identity.CanManageIdentity);
         Assert.False(pages.Identity.CanManageGitHub);
-        Assert.False(pages.Identity.CanArchiveConfig);
+        Assert.False(pages.Backup.CanArchiveConfig);
+        Assert.False(pages.Backup.CanImportBundle);
         Assert.False(pages.Server.CanCheckQwen);
     }
 

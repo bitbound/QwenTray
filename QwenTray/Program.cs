@@ -100,8 +100,8 @@ internal static class Program
         services.AddSingleton<IWslDistro>(provider => provider.GetRequiredService<WslDistro>());
         services.AddSingleton<WslDistroProvisioner>();
         services.AddSingleton<IdentityService>();
-        services.AddSingleton<QwenConfigArchive>();
-        services.AddSingleton<QwenConfigArchiveService>();
+        services.AddSingleton<IQwenConfigArchive, QwenConfigArchive>();
+        services.AddSingleton<IQwenConfigArchiveService, QwenConfigArchiveService>();
         services.AddSingleton<BackupBundle>();
         services.AddSingleton<DistroBackupService>();
         services.AddSingleton<DevToolInstaller>();
@@ -123,6 +123,7 @@ internal static class Program
         services.AddSingleton<SettingsSaveViewModel>();
         services.AddSingleton<DaemonViewModel>();
         services.AddSingleton<EnvironmentViewModel>();
+        services.AddSingleton<BackupViewModel>();
         services.AddSingleton<IdentityViewModel>();
         services.AddSingleton<ServerViewModel>();
         services.AddSingleton<SettingsViewModel>();
@@ -131,6 +132,7 @@ internal static class Program
         services.AddTransient<MainWindow>();
         services.AddTransient<DaemonView>();
         services.AddTransient<EnvironmentView>();
+        services.AddTransient<BackupView>();
         services.AddTransient<IdentityView>();
         services.AddTransient<ServerView>();
         services.AddTransient<SettingsView>();

@@ -142,6 +142,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         var server = _services.GetRequiredService<ServerViewModel>();
         var environment = _services.GetRequiredService<EnvironmentViewModel>();
         var identity = _services.GetRequiredService<IdentityViewModel>();
+        var backup = _services.GetRequiredService<BackupViewModel>();
         var settingsPage = _services.GetRequiredService<SettingsViewModel>();
 
         if (!int.TryParse(server.Port.Trim(), out var port) || port is < 0 or > 65535)
@@ -210,7 +211,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
             return $"Two profiles both use the Linux user \"{duplicate.Key}\". Each identity needs its own user.";
         }
 
-        var badBackupPath = SplitLines(identity.ConfigPaths).FirstOrDefault(path => !QwenConfigArchive.IsBackupablePath(path));
+        var badBackupPath = SplitLines(backup.ConfigPaths).FirstOrDefault(path => !QwenConfigArchive.IsBackupablePath(path));
         if (badBackupPath is not null)
         {
             return $"\"{badBackupPath}\" is not an absolute Linux path. Configuration backups list full paths such as /home/qwen/.qwen/QWEN.md.";
@@ -219,14 +220,14 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         _settings.WslDistroName = distroName;
         // The folder is what is kept. The file name carries a timestamp so an export never lands on an
         // earlier bundle, and only the folder survives to the next run.
-        var bundlePath = environment.BundlePath.Trim();
+        var bundlePath = backup.BundlePath.Trim();
         _settings.BundleDirectory = bundlePath.Length == 0
             ? string.Empty
             : Path.GetDirectoryName(bundlePath)
               ?? string.Empty;
-        // The same rule for a configuration archive, kept apart so one page's path does not overwrite
-        // the other's.
-        var archivePath = identity.ConfigArchivePath.Trim();
+        // The same rule for a configuration archive, kept apart from the bundle folder so one page's
+        // path does not overwrite the other's.
+        var archivePath = backup.ConfigArchivePath.Trim();
         _settings.ConfigArchiveDirectory = archivePath.Length == 0
             ? string.Empty
             : Path.GetDirectoryName(archivePath)
@@ -256,7 +257,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         _settings.CheckForUpdates = settingsPage.CheckForUpdates;
         _settings.MaxBackoffSeconds = Math.Max(1, ParseInt(settingsPage.MaxBackoffSeconds, _settings.MaxBackoffSeconds));
         _settings.ExtraArgs = SplitLines(server.ExtraArgs);
-        _settings.ConfigBackupPaths = SplitLines(identity.ConfigPaths);
+        _settings.ConfigBackupPaths = SplitLines(backup.ConfigPaths);
 
         return null;
     }

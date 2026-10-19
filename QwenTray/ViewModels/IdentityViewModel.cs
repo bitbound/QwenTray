@@ -9,14 +9,12 @@ using QwenTray.Views;
 namespace QwenTray.ViewModels;
 
 /// <summary>
-/// The identity profiles, the credentials and keys that make each one distinct, and the backup of the
-/// Qwen configuration in the active profile's home directory.
+/// The identity profiles and the credentials and keys that make each one distinct.
 /// </summary>
 public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
 {
     private readonly Settings _settings;
     private readonly IdentityService _identity;
-    private readonly QwenConfigArchiveService _archive;
     private readonly WslDistroProvisioner _provisioner;
     private readonly EnvironmentViewModel _environment;
     private readonly SettingsSaveViewModel _save;
@@ -83,20 +81,9 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     [NotifyPropertyChangedFor(nameof(CanManageIdentity))]
     private bool _isIdentityBusy;
 
-    [ObservableProperty]
-    private string _configPaths = string.Empty;
-
-    [ObservableProperty]
-    private string _configArchivePath = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanArchiveConfig))]
-    private bool _isArchiving;
-
     public IdentityViewModel(
         Settings settings,
         IdentityService identity,
-        QwenConfigArchiveService archive,
         WslDistroProvisioner provisioner,
         EnvironmentViewModel environment,
         SettingsSaveViewModel save,
@@ -106,7 +93,6 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     {
         _settings = settings;
         _identity = identity;
-        _archive = archive;
         _provisioner = provisioner;
         _environment = environment;
         _save = save;
@@ -120,21 +106,16 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
             if (e.PropertyName != nameof(EnvironmentViewModel.IsBackupBusy)) return;
             OnPropertyChanged(nameof(CanManageIdentity));
             OnPropertyChanged(nameof(CanManageGitHub));
-            OnPropertyChanged(nameof(CanArchiveConfig));
         };
 
-        // The shared save reads the profile list and the backup paths even when the user never opened
-        // this page, so the singleton has to carry them from construction.
+        // The shared save reads the profile list even when the user never opened this page, so the
+        // singleton has to carry it from construction.
         LoadProfiles();
-        ConfigPaths = string.Join(Environment.NewLine, EffectiveConfigPaths());
-        ConfigArchivePath = QwenConfigArchiveService.DefaultArchivePath(_settings.ConfigArchiveDirectory);
     }
 
     public bool CanManageIdentity => !IsIdentityBusy && !_environment.IsBackupBusy;
 
     public bool CanManageGitHub => !IsGitHubBusy && !_environment.IsBackupBusy;
-
-    public bool CanArchiveConfig => !IsArchiving && !_environment.IsBackupBusy;
 
     public bool HasIdentityKeys => HasSshPublicKey || HasGpgPublicKey;
 
@@ -143,12 +124,6 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
     protected override async Task OnInitializeAsync()
     {
         LoadProfiles();
-        ConfigPaths = string.Join(Environment.NewLine, EffectiveConfigPaths());
-        // A typed path survives a revisit, while an emptied field gets a fresh name in the stored folder.
-        if (string.IsNullOrWhiteSpace(ConfigArchivePath))
-        {
-            ConfigArchivePath = QwenConfigArchiveService.DefaultArchivePath(_settings.ConfigArchiveDirectory);
-        }
 
         // Reading the keys boots the distro, which a running backup would be doing something else with.
         if (_environment.IsBackupBusy) return;
@@ -536,90 +511,6 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
         }
     }
 
-    [RelayCommand]
-    private async Task ExportConfigAsync()
-    {
-        var (distro, profile) = CurrentIdentityTarget();
-        if (distro is null) return;
-
-        var archivePath = ConfigArchivePath.Trim();
-        if (archivePath.Length == 0)
-        {
-            _snackbars.Show("Set an archive path first.", SnackbarKind.Error);
-            return;
-        }
-
-        IsArchiving = true;
-        try
-        {
-            var result = await _archive.ExportAsync(distro, profile, SplitLines(ConfigPaths), archivePath, CancellationToken.None);
-            // The next export gets a fresh timestamp rather than landing on the one just written.
-            ConfigArchivePath = QwenConfigArchiveService.DefaultArchivePath(_settings.ConfigArchiveDirectory);
-
-            var notes = new List<string>();
-            if (result.Missing.Length > 0) notes.Add($"Not found: {string.Join(", ", result.Missing)}.");
-            if (result.Invalid.Length > 0) notes.Add($"Not absolute Linux paths: {string.Join(", ", result.Invalid)}.");
-            var note = string.Join(" ", notes);
-            _snackbars.Show(
-                $"Wrote {result.FilesWritten} file(s) from the \"{profile.Name}\" profile to {result.ArchivePath}.{(note.Length > 0 ? " " + note : string.Empty)}",
-                result.FilesWritten > 0 ? SnackbarKind.Success : SnackbarKind.Warning);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Exporting the Qwen configuration failed.");
-            _snackbars.Show($"Export failed: {ex.Message}", SnackbarKind.Error);
-        }
-        finally
-        {
-            IsArchiving = false;
-        }
-    }
-
-    [RelayCommand]
-    private async Task RestoreConfigAsync()
-    {
-        var (distro, profile) = CurrentIdentityTarget();
-        if (distro is null) return;
-
-        var archivePath = ConfigArchivePath.Trim();
-        if (archivePath.Length == 0)
-        {
-            _snackbars.Show("Set an archive path first.", SnackbarKind.Error);
-            return;
-        }
-
-        IsArchiving = true;
-        try
-        {
-            var manifest = await _archive.ProbeAsync(archivePath, CancellationToken.None);
-            var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
-                "Restore the configuration?",
-                $"The files in this archive are written into the \"{profile.Name}\" profile and replace any file at the same path.",
-                "Restore",
-                $"Archive: {archivePath}. Written from {manifest.WslDistroName} as {manifest.LinuxUser} on {manifest.CreatedAtUtc.ToLocalTime():g}, holding {manifest.Files.Length} file(s)."));
-            if (!confirmed) return;
-
-            var result = await _archive.RestoreAsync(distro, profile, archivePath, CancellationToken.None);
-
-            var notes = new List<string>();
-            if (result.Missing.Length > 0) notes.Add($"Missing from the archive: {string.Join(", ", result.Missing)}.");
-            if (result.Invalid.Length > 0) notes.Add($"Not absolute Linux paths: {string.Join(", ", result.Invalid)}.");
-            var note = string.Join(" ", notes);
-            _snackbars.Show(
-                $"Restored {result.FilesWritten} file(s) into the \"{profile.Name}\" profile.{(note.Length > 0 ? " " + note : string.Empty)}",
-                result.FilesWritten > 0 ? SnackbarKind.Success : SnackbarKind.Warning);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Restoring the Qwen configuration failed.");
-            _snackbars.Show($"Restore failed: {ex.Message}", SnackbarKind.Error);
-        }
-        finally
-        {
-            IsArchiving = false;
-        }
-    }
-
     private void LoadProfiles()
     {
         Profiles.Clear();
@@ -668,13 +559,4 @@ public sealed partial class IdentityViewModel : ViewModelBase<IdentityView>
             _ = LoadIdentityCoreAsync(announce: false);
         }
     }
-
-    private string[] EffectiveConfigPaths()
-    {
-        if (_settings.ConfigBackupPaths.Length > 0) return _settings.ConfigBackupPaths;
-        return QwenConfigArchiveService.DefaultPaths(SelectedProfile ?? _settings.ResolveActiveProfile());
-    }
-
-    private static string[] SplitLines(string? text) =>
-        (text ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

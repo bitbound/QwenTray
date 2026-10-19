@@ -36,7 +36,24 @@ public sealed record ConfigRestoreResult(int FilesWritten, string[] Missing, str
 /// archive is read from and written to, which is the distro's share in the app and a temporary folder
 /// in tests.
 /// </summary>
-public sealed class QwenConfigArchive(IFileSystem fileSystem)
+public interface IQwenConfigArchive
+{
+    Task<ConfigExportResult> ExportAsync(
+        string hostRoot,
+        string archivePath,
+        ConfigArchiveManifest manifest,
+        IReadOnlyCollection<string> paths,
+        CancellationToken cancellationToken);
+
+    Task<ConfigArchiveManifest> ReadManifestAsync(string archivePath, CancellationToken cancellationToken);
+
+    Task<ConfigRestoreResult> RestoreAsync(string hostRoot, string archivePath, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// The archive format itself, with no knowledge of the distro it reads from or writes back into.
+/// </summary>
+public sealed class QwenConfigArchive(IFileSystem fileSystem) : IQwenConfigArchive
 {
     public const string ManifestEntry = "manifest.json";
     private const string FilesPrefix = "files";

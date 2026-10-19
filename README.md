@@ -81,17 +81,21 @@ The profile users are deliberately unprivileged and cannot use `sudo`. **Open ad
 the Daemon page gives you, the operator, a root shell in the distro for installing packages and
 editing its configuration, without granting the daemon those rights.
 
-## Configuration Backup
+## Backup
 
-**Export backup** writes a ZIP of the active profile's Qwen configuration from inside the distro.
+Both backups live on the **Backup** page. Neither reads or writes the Windows `%USERPROFILE%\.qwen`
+folder.
+
+**WSL backup** exports the whole distro plus this machine's QwenTray settings into one bundle, and
+imports a bundle made earlier.
+
+**Configuration backup** writes a ZIP of the active profile's Qwen configuration from inside the distro.
 **Restore backup** writes those files back. The list holds absolute Linux paths, one per line, and
 defaults to `QWEN.md`, `agents`, `rules`, `memories`, `skills`, `workflows`, and `settings.json` under
 `~/.qwen`. A folder includes every file beneath it, and any path can be added or removed.
 
-The Windows `%USERPROFILE%\.qwen` folder is never read or written. Only the distro side is backed up.
-Files move over the `\\wsl.localhost` share, so the distro has to be running.
-
-`settings.json` holds live API keys, so an archive carries them. Keep it somewhere private.
+Both move files over the `\\wsl.localhost` share, so the distro has to be running. `settings.json` is
+now inside the default list, so an archive carries live API keys. Keep it somewhere private.
 
 ## Code Signing
 

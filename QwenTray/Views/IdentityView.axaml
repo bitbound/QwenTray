@@ -208,44 +208,6 @@
           </StackPanel>
         </Border>
 
-        <Border Classes="Card">
-          <StackPanel Spacing="10">
-            <TextBlock Classes="h2" Text="Configuration backup" />
-
-            <TextBlock Classes="caption"
-                       TextWrapping="Wrap"
-                       Text="A ZIP of the files below, taken from the active profile's home inside the distro. The Windows .qwen folder is never read or written." />
-
-            <TextBlock Classes="field" Text="Paths to include" />
-            <TextBox Text="{Binding ConfigPaths}"
-                     AcceptsReturn="True"
-                     TextWrapping="Wrap"
-                     MinHeight="70"
-                     MaxHeight="200"
-                     FontFamily="Consolas,Menlo,monospace" />
-            <TextBlock Classes="caption"
-                       TextWrapping="Wrap"
-                       Text="One absolute Linux path per line, for example /home/qwen/.qwen/QWEN.md. A folder includes every file under it." />
-
-            <TextBlock Classes="field" Text="Archive file" />
-            <TextBox Text="{Binding ConfigArchivePath}" />
-            <TextBlock Classes="caption"
-                       TextWrapping="Wrap"
-                       Text="Export writes to this path and refuses to overwrite a file that is already there. For a restore, point it at an archive made earlier. settings.json holds live credentials, so keep the archive private." />
-
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-              <Button Content="Export backup"
-                      Classes="Primary VariantFilled"
-                      Command="{Binding ExportConfigCommand}"
-                      IsEnabled="{Binding CanArchiveConfig}" />
-              <Button Content="Restore backup"
-                      Classes="Primary VariantOutlined"
-                      Command="{Binding RestoreConfigCommand}"
-                      IsEnabled="{Binding CanArchiveConfig}" />
-            </StackPanel>
-          </StackPanel>
-        </Border>
-
       </StackPanel>
     </ScrollViewer>
 

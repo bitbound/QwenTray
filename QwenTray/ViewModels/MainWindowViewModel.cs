@@ -84,6 +84,7 @@ public partial class MainWindowViewModel : ViewModelBase<MainWindow>, IMainWindo
 
         NavigationItems.Add(new NavItemViewModel("play_regular", "Daemon", _navigation, typeof(DaemonViewModel)));
         NavigationItems.Add(new NavItemViewModel("folder_regular", "Environment", _navigation, typeof(EnvironmentViewModel)));
+        NavigationItems.Add(new NavItemViewModel("save_regular", "Backup", _navigation, typeof(BackupViewModel)));
         NavigationItems.Add(new NavItemViewModel("key_regular", "Identity", _navigation, typeof(IdentityViewModel)));
         NavigationItems.Add(new NavItemViewModel("desktop_regular", "Server", _navigation, typeof(ServerViewModel)));
         NavigationItems.Add(new NavItemViewModel("settings_regular", "Settings", _navigation, typeof(SettingsViewModel)));

@@ -8,11 +8,32 @@ namespace QwenTray.Services;
 /// Backs up and restores the active profile's Qwen configuration from inside the distro. The Windows
 /// <c>%USERPROFILE%\.qwen</c> folder is never read or written.
 /// </summary>
+public interface IQwenConfigArchiveService
+{
+    Task<ConfigExportResult> ExportAsync(
+        string distro,
+        IdentityProfile profile,
+        IReadOnlyCollection<string> paths,
+        string archivePath,
+        CancellationToken cancellationToken);
+
+    Task<ConfigArchiveManifest> ProbeAsync(string archivePath, CancellationToken cancellationToken);
+
+    Task<ConfigRestoreResult> RestoreAsync(
+        string distro,
+        IdentityProfile profile,
+        string archivePath,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Drives the archive over the distro share, so each command wakes the distro first.
+/// </summary>
 public sealed class QwenConfigArchiveService(
-    QwenConfigArchive archive,
+    IQwenConfigArchive archive,
     IWslDistro wsl,
     AppInfo appInfo,
-    ILogger<QwenConfigArchiveService> logger)
+    ILogger<QwenConfigArchiveService> logger) : IQwenConfigArchiveService
 {
     private static readonly string[] ConfigEntries =
         ["QWEN.md", "agents", "rules", "memories", "skills", "workflows", "settings.json"];
