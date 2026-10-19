@@ -210,6 +210,12 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
             return $"Two profiles both use the Linux user \"{duplicate.Key}\". Each identity needs its own user.";
         }
 
+        var badBackupPath = SplitLines(identity.ConfigPaths).FirstOrDefault(path => !QwenConfigArchive.IsBackupablePath(path));
+        if (badBackupPath is not null)
+        {
+            return $"\"{badBackupPath}\" is not an absolute Linux path. Configuration backups list full paths such as /home/qwen/.qwen/QWEN.md.";
+        }
+
         _settings.WslDistroName = distroName;
         // The folder is what is kept. The file name carries a timestamp so an export never lands on an
         // earlier bundle, and only the folder survives to the next run.
@@ -217,6 +223,13 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         _settings.BundleDirectory = bundlePath.Length == 0
             ? string.Empty
             : Path.GetDirectoryName(bundlePath)
+              ?? string.Empty;
+        // The same rule for a configuration archive, kept apart so one page's path does not overwrite
+        // the other's.
+        var archivePath = identity.ConfigArchivePath.Trim();
+        _settings.ConfigArchiveDirectory = archivePath.Length == 0
+            ? string.Empty
+            : Path.GetDirectoryName(archivePath)
               ?? string.Empty;
         _settings.Profiles = [.. identity.Profiles];
         _settings.ActiveProfileId = identity.SelectedProfile?.Id ?? identity.Profiles[0].Id;
@@ -243,7 +256,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         _settings.CheckForUpdates = settingsPage.CheckForUpdates;
         _settings.MaxBackoffSeconds = Math.Max(1, ParseInt(settingsPage.MaxBackoffSeconds, _settings.MaxBackoffSeconds));
         _settings.ExtraArgs = SplitLines(server.ExtraArgs);
-        _settings.SyncPaths = SplitLines(identity.SyncEntries);
+        _settings.ConfigBackupPaths = SplitLines(identity.ConfigPaths);
 
         return null;
     }

@@ -37,7 +37,10 @@ internal sealed class SettingsPages
             Snackbars, null!, Save, NullLogger<EnvironmentViewModel>.Instance);
         Identity = new IdentityViewModel(
             Settings, new IdentityService(wsl, NullLogger<IdentityService>.Instance),
-            new WslConfigSyncService(fileSystem, wsl, NullLogger<WslConfigSyncService>.Instance),
+            new QwenConfigArchiveService(
+                new QwenConfigArchive(fileSystem), wsl,
+                new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)),
+                NullLogger<QwenConfigArchiveService>.Instance),
             provisioner, Environment, Save, Snackbars, null!, NullLogger<IdentityViewModel>.Instance);
         Firewall = new FakeFirewallRules();
         Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Environment, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
@@ -186,7 +189,7 @@ public sealed class SettingsSaveTests
         pages.Server.DebugMode = true;
         pages.Server.ExtraArgs = "--verbose\n--log-level debug";
         pages.Server.QwenExecutable = "/opt/qwen/bin/qwen";
-        pages.Identity.SyncEntries = "QWEN.md\nagents";
+        pages.Identity.ConfigPaths = "/home/qwen/.qwen/QWEN.md\n/home/qwen/.qwen/agents";
         pages.Page.HealthPollSeconds = "12";
         pages.Page.AutoRestart = false;
         pages.Page.CheckForUpdates = false;
@@ -213,7 +216,7 @@ public sealed class SettingsSaveTests
         Assert.True(settings.RateLimit);
         Assert.True(settings.DebugMode);
         Assert.Equal(["--verbose", "--log-level debug"], settings.ExtraArgs);
-        Assert.Equal(["QWEN.md", "agents"], settings.SyncPaths);
+        Assert.Equal(["/home/qwen/.qwen/QWEN.md", "/home/qwen/.qwen/agents"], settings.ConfigBackupPaths);
         Assert.Equal(12, settings.HealthPollSeconds);
         Assert.False(settings.AutoRestart);
         Assert.False(settings.CheckForUpdates);
@@ -239,7 +242,7 @@ public sealed class SettingsSaveTests
             MaxSessions = 8,
             RateLimit = true,
             ExtraArgs = ["--verbose"],
-            SyncPaths = ["QWEN.md"],
+            ConfigBackupPaths = ["/home/qwen/.qwen/QWEN.md"],
             AutoRestart = true,
             CheckForUpdates = true,
             HealthPollSeconds = 12,
@@ -261,7 +264,7 @@ public sealed class SettingsSaveTests
         Assert.Equal(8, settings.MaxSessions);
         Assert.True(settings.RateLimit);
         Assert.Equal(["--verbose"], settings.ExtraArgs);
-        Assert.Equal(["QWEN.md"], settings.SyncPaths);
+        Assert.Equal(["/home/qwen/.qwen/QWEN.md"], settings.ConfigBackupPaths);
         Assert.True(settings.AutoRestart);
         Assert.True(settings.CheckForUpdates);
         Assert.Equal(12, settings.HealthPollSeconds);
@@ -466,14 +469,14 @@ public sealed class SettingsPageBusyGateTests
 
         Assert.True(pages.Identity.CanManageIdentity);
         Assert.True(pages.Identity.CanManageGitHub);
-        Assert.True(pages.Identity.CanSyncConfig);
+        Assert.True(pages.Identity.CanArchiveConfig);
         Assert.True(pages.Server.CanCheckQwen);
 
         pages.Environment.IsBackupBusy = true;
 
         Assert.False(pages.Identity.CanManageIdentity);
         Assert.False(pages.Identity.CanManageGitHub);
-        Assert.False(pages.Identity.CanSyncConfig);
+        Assert.False(pages.Identity.CanArchiveConfig);
         Assert.False(pages.Server.CanCheckQwen);
     }
 

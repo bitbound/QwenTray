@@ -283,43 +283,6 @@ public sealed class WslConfigTests
     }
 }
 
-public sealed class SyncEntryTests
-{
-    [Theory]
-    [InlineData("QWEN.md")]
-    [InlineData("agents")]
-    [InlineData("rules")]
-    [InlineData("memories")]
-    [InlineData("skills")]
-    [InlineData("workflows")]
-    [InlineData("agents/reviewer.md")]
-    public void TheAgreedEntriesAreSyncable(string entry)
-    {
-        Assert.True(WslConfigSyncService.IsSyncableEntry(entry));
-    }
-
-    [Theory]
-    [InlineData("settings.json")]
-    [InlineData("projects")]
-    [InlineData("../secret")]
-    [InlineData("agents/../../etc/passwd")]
-    [InlineData("/etc/passwd")]
-    [InlineData(@"C:\Windows\System32")]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void DangerousOrExcludedEntriesAreRejected(string entry)
-    {
-        Assert.False(WslConfigSyncService.IsSyncableEntry(entry));
-    }
-
-    [Fact]
-    public void SettingsJsonIsRejectedEvenWhenNestedOrCased()
-    {
-        Assert.False(WslConfigSyncService.IsSyncableEntry("SETTINGS.JSON"));
-        Assert.False(WslConfigSyncService.IsSyncableEntry("Projects"));
-    }
-}
-
 public sealed class IdentityTests
 {
     [Fact]

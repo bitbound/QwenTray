@@ -218,11 +218,11 @@ public sealed class ImportedSettingsTests
             Profiles = [new IdentityProfile { Id = "work", Name = "Work", LinuxUser = "work" }],
             Token = "from-the-bundle",
             Port = 5199,
-            SyncPaths = ["QWEN.md"],
+            ConfigBackupPaths = ["/home/qwen/.qwen/QWEN.md"],
             LastUpdateCheckUtc = DateTimeOffset.UnixEpoch,
             ExtraArgs = ["--verbose"],
         };
-        var target = new Settings { WslDistroName = "Local", Token = "local-token", Port = 4170, SyncPaths = [], ExtraArgs = [] };
+        var target = new Settings { WslDistroName = "Local", Token = "local-token", Port = 4170, ConfigBackupPaths = [], ExtraArgs = [] };
 
         target.CopyFrom(source);
 

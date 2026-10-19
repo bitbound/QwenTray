@@ -90,6 +90,12 @@ public sealed class Settings
     /// </summary>
     public string BundleDirectory { get; set; } = "";
 
+    /// <summary>
+    /// The folder a configuration backup is written to. Empty means the app's own backups folder. Only
+    /// the folder is kept, because the file name carries a timestamp generated at export.
+    /// </summary>
+    public string ConfigArchiveDirectory { get; set; } = "";
+
     public string ActiveProfileId { get; set; } = "";
     public IdentityProfile[] Profiles { get; set; } = [];
 
@@ -131,11 +137,8 @@ public sealed class Settings
     public bool RateLimit { get; set; }
     public bool DebugMode { get; set; }
 
-    /// <summary>Configuration entries synced between Windows and the active profile's <c>~/.qwen</c>.</summary>
-    public string[] SyncPaths { get; set; } = [];
-
-    [System.Text.Json.Serialization.JsonIgnore]
-    public static string[] DefaultSyncPaths => ["QWEN.md", "agents", "rules", "memories", "skills", "workflows"];
+    /// <summary>Absolute Linux paths inside the distro that a configuration backup includes.</summary>
+    public string[] ConfigBackupPaths { get; set; } = [];
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool UsesBearerAuth => !string.IsNullOrWhiteSpace(Token) || RequireAuth;
@@ -236,7 +239,7 @@ public sealed class Settings
         EventRingSize = other.EventRingSize;
         RateLimit = other.RateLimit;
         DebugMode = other.DebugMode;
-        SyncPaths = other.SyncPaths;
+        ConfigBackupPaths = other.ConfigBackupPaths;
     }
 }
 
@@ -260,7 +263,6 @@ public sealed class SettingsStore(IFileSystem fileSystem)
                 Profiles = [Settings.CreateDefaultProfile()],
             };
             seeded.ActiveProfileId = seeded.Profiles[0].Id;
-            seeded.SyncPaths = Settings.DefaultSyncPaths;
             Save(seeded);
             return seeded;
         }
@@ -358,4 +360,5 @@ internal static class SettingsCipher
     WriteIndented = true)]
 [System.Text.Json.Serialization.JsonSerializable(typeof(Settings))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(QwenTray.Services.BackupManifest))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(QwenTray.Services.ConfigArchiveManifest))]
 public partial class QwenTrayJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
