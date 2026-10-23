@@ -26,8 +26,11 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
 {
     public static IReadOnlyList<DevTool> Catalog { get; } =
     [
-        new("browser", "Web browser", "Microsoft Edge with xdg-utils, registered as the distro's default browser.", InstallBrowser),
+        new("docker", "Docker Engine", "The container engine and CLI, for app hosts that run dependencies in containers.", InstallDocker),
         new("cli-utils", "Build tools and CLI utilities", "build-essential, jq, ripgrep, and fd.", InstallCliUtils),
+        new("open-code-review", "Open Code Review", "The ocr code review CLI, with its Qwen Code skills in every profile home.", InstallOpenCodeReview),
+        new("zvec-grep", "zvec-grep", "The zg semantic code search CLI, registered with Qwen Code in every profile home.", InstallZvecGrep),
+        new("browser", "Web browser", "Microsoft Edge with xdg-utils, registered as the distro's default browser.", InstallBrowser),
         new("dotnet", ".NET SDK 10", "The current LTS .NET SDK and its runtimes.", InstallDotNet),
         new("node", "Node.js and npm", "The current Node.js LTS line, with npm.", InstallNode),
         new("azure-cli", "Azure CLI", "The az command line for working with Azure.", InstallAzureCli),
@@ -35,7 +38,6 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
         new("python", "Python tooling", "python3 with venv and pip, plus the uv package manager.", InstallPython),
         new("go", "Go", "The latest Go toolchain.", InstallGo),
         new("rust", "Rust", "rustup with the stable toolchain.", InstallRust),
-        new("docker", "Docker Engine", "The container engine and CLI, for app hosts that run dependencies in containers.", InstallDocker),
     ];
 
     public async Task<WslCommandResult> InstallAsync(string distro, DevTool tool, IReadOnlyList<IdentityProfile> profiles, CancellationToken cancellationToken)
@@ -91,6 +93,34 @@ public sealed class DevToolInstaller(IWslDistro wsl, ILogger<DevToolInstaller> l
     private const string InstallCliUtils =
         "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential jq ripgrep fd-find "
         + "&& ln -sf \"$(command -v fdfind)\" /usr/local/bin/fd";
+
+    // The vendor script checks the release checksum itself, and OCR_INSTALL_DIR puts the binary on the
+    // shared path instead of in root's home. The skills are Qwen Code content that lives per profile, so
+    // each human account gets its own copy. The tree is chowned rather than built with install -d, which
+    // would also re-mode the profile's ~/.qwen directory where its settings and keys live.
+    private const string InstallOpenCodeReview =
+        "curl -fsSL https://open-codereview.ai/install.sh -o /tmp/ocr-install.sh "
+        + "&& OCR_INSTALL_DIR=/usr/local/bin sh /tmp/ocr-install.sh && rm -f /tmp/ocr-install.sh "
+        + "&& for account in $(awk -F: '$3 >= 1000 && $3 < 65534 { print $1 }' /etc/passwd); do "
+        + "home=$(getent passwd \"$account\" | cut -d: -f6) "
+        + "&& for skill in open-code-review open-code-review-delegate; do "
+        + "mkdir -p \"$home/.qwen/skills/$skill\" "
+        + "&& curl -fsSL \"https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/skills/$skill/SKILL.md\" -o \"$home/.qwen/skills/$skill/SKILL.md\" "
+        + "&& chown -R \"$account:$account\" \"$home/.qwen/skills\" "
+        + "; done; done";
+
+    // The package is global, so one binary serves every profile, but zg's own integrator writes the MCP
+    // registration and its managed guidance into the account's Qwen Code files, so that half runs as the
+    // profile user under a login shell. Node comes from the same NodeSource LTS line as the Node.js entry
+    // because the package needs a current Node, and a distro that already has npm skips that half.
+    private const string InstallZvecGrep =
+        "command -v npm >/dev/null 2>&1 || { apt-get update "
+        + "&& DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg "
+        + "&& curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - "
+        + "&& DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs; } "
+        + "&& npm install -g @zvec/zvec-grep "
+        + "&& for account in $(awk -F: '$3 >= 1000 && $3 < 65534 { print $1 }' /etc/passwd); do "
+        + "runuser -l \"$account\" -c 'zg install --target qwen --yes'; done";
 
     // uv's installer honors UV_INSTALL_DIR and UV_NO_MODIFY_PATH, so it lands on the shared path
     // rather than in root's home.

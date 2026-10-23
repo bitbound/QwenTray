@@ -28,10 +28,18 @@ public sealed class DevToolInstallerTests
     public void TheRequestedToolsAreAllPresent()
     {
         var ids = DevToolInstaller.Catalog.Select(tool => tool.Id).ToHashSet(StringComparer.Ordinal);
-        foreach (var id in new[] { "dotnet", "node", "azure-cli", "aspire", "cli-utils", "python", "go", "rust", "browser", "docker" })
+        foreach (var id in new[] { "dotnet", "node", "azure-cli", "aspire", "cli-utils", "python", "go", "rust", "browser", "docker", "open-code-review", "zvec-grep" })
         {
             Assert.Contains(id, ids);
         }
+    }
+
+    [Fact]
+    public void TheCatalogLeadsWithTheToolsAnAgentSessionNeedsFirst()
+    {
+        Assert.Equal(
+            ["docker", "cli-utils", "open-code-review", "zvec-grep", "browser", "dotnet", "node", "azure-cli", "aspire", "python", "go", "rust"],
+            DevToolInstaller.Catalog.Select(tool => tool.Id));
     }
 
     [Fact]
@@ -79,6 +87,36 @@ public sealed class DevToolInstallerTests
         Assert.Contains("fd-find", script, StringComparison.Ordinal);
         // Ubuntu ships the binary as fdfind, so the name people type is linked to it.
         Assert.Contains("/usr/local/bin/fd", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpenCodeReviewSharesOneBinaryAndGivesEveryProfileItsOwnSkills()
+    {
+        var script = Tool("open-code-review").Script;
+        // The vendor script verifies the release checksum, and the install dir keeps the binary off
+        // root's home so every profile resolves the same ocr.
+        Assert.Contains("https://open-codereview.ai/install.sh", script, StringComparison.Ordinal);
+        Assert.Contains("OCR_INSTALL_DIR=/usr/local/bin", script, StringComparison.Ordinal);
+        Assert.Contains("for skill in open-code-review open-code-review-delegate", script, StringComparison.Ordinal);
+        Assert.Contains("$home/.qwen/skills/$skill/SKILL.md", script, StringComparison.Ordinal);
+        // install -d would also re-mode ~/.qwen, which holds the profile's settings and keys.
+        Assert.DoesNotContain("install -d", script, StringComparison.Ordinal);
+        Assert.Contains("chown -R \"$account:$account\" \"$home/.qwen/skills\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ZvecGrepIsOneGlobalPackageButRegistersItselfPerProfile()
+    {
+        var script = Tool("zvec-grep").Script;
+        Assert.Contains("npm install -g @zvec/zvec-grep", script, StringComparison.Ordinal);
+        Assert.Contains("zg install --target qwen --yes", script, StringComparison.Ordinal);
+        // The integrator writes the MCP registration into the account's own Qwen Code files, so it
+        // cannot run as root.
+        Assert.Contains("runuser -l \"$account\"", script, StringComparison.Ordinal);
+        // The package needs a current Node, so a distro with no npm gets the same LTS line as the
+        // Node.js entry rather than Ubuntu's older package.
+        Assert.Contains("command -v npm", script, StringComparison.Ordinal);
+        Assert.Contains("https://deb.nodesource.com/setup_lts.x", script, StringComparison.Ordinal);
     }
 
     [Fact]
