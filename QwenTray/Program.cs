@@ -104,6 +104,7 @@ internal static class Program
         services.AddSingleton<IQwenConfigArchive, QwenConfigArchive>();
         services.AddSingleton<IQwenConfigArchiveService, QwenConfigArchiveService>();
         services.AddSingleton<BackupBundle>();
+        services.AddSingleton<WslDistroLocation>();
         services.AddSingleton<DistroBackupService>();
         services.AddSingleton<DevToolInstaller>();
         services.AddSingleton<RegistryAutostartService>();

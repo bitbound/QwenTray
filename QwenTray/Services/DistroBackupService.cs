@@ -5,17 +5,19 @@ using QwenTray.Updates;
 
 namespace QwenTray.Services;
 
-public sealed record ExportResult(string BundlePath, long BundleBytes, long DistroUsedBytes);
+public sealed record ExportResult(string BundlePath, long BundleBytes);
 
 /// <summary>
-/// Moves a whole QwenTray setup between machines. An export stops the distro and packs its filesystem
-/// together with the host settings as plaintext, because a DPAPI blob only opens for the account that
-/// wrote it. An import registers the filesystem again and re-protects the settings for this account.
+/// Moves a whole QwenTray setup between machines. An export stops the distro and copies the virtual disk
+/// it boots from together with the host settings as plaintext, because a DPAPI blob only opens for the
+/// account that wrote it. An import copies that disk into place and registers it where it lies, so neither
+/// direction unpacks a filesystem.
 /// </summary>
 public sealed class DistroBackupService(
     IWslDistro wsl,
     IFileSystem fileSystem,
     BackupBundle bundle,
+    WslDistroLocation location,
     SettingsStore settingsStore,
     Settings settings,
     WslDistroProvisioner provisioner,
@@ -23,9 +25,9 @@ public sealed class DistroBackupService(
     AppInfo appInfo,
     ILogger<DistroBackupService> logger)
 {
-    // An export needs room for the tar and for the finished bundle, an import room for the extracted tar
-    // and for the filesystem wsl builds out of it. Each copy is roughly the size of the distro itself,
-    // and this is the room left on top of that.
+    // An export copies the distro's disk to the bundle, and an import copies it from the bundle into the
+    // folder wsl will boot it from. One copy of the disk is what a volume has to have room for, and this is
+    // what is left on top of that.
     private const long HeadroomBytes = 2L * 1024 * 1024 * 1024;
 
     private static string LocalRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "qwentray");
@@ -37,15 +39,15 @@ public sealed class DistroBackupService(
     private static string WslRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "wsl");
 
     /// <summary>
-    /// A bundle path under <paramref name="directory"/>, or under the app's own backups folder when
-    /// that is empty. The name carries a timestamp so an export never lands on an earlier bundle.
+    /// A bundle folder under <paramref name="directory"/>, or under the app's own backups folder when that
+    /// is empty. The name carries a timestamp so an export never lands on an earlier bundle.
     /// </summary>
-    public static string DefaultBundlePath(string? directory = null) =>
+    public static string DefaultBundleDirectory(string? directory = null) =>
         Path.Combine(
-          string.IsNullOrWhiteSpace(directory) 
-            ? BackupDirectory 
-            : directory.Trim(), 
-          $"qwentray-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+          string.IsNullOrWhiteSpace(directory)
+            ? BackupDirectory
+            : directory.Trim(),
+          $"qwentray-{DateTime.Now:yyyyMMdd-HHmmss}");
 
     /// <summary>
     /// Reads and checks a bundle without changing anything, so the page can say what is about to be
@@ -65,64 +67,59 @@ public sealed class DistroBackupService(
         return contents;
     }
 
+    /// <summary>
+    /// Copies the distro's disk and this machine's settings into a bundle folder. Nothing is destroyed, but
+    /// the distro is stopped so its disk is not copied while it is mounted, and it stays stopped.
+    /// </summary>
     public async Task<ExportResult> ExportAsync(string bundlePath, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(bundlePath)) throw new InvalidOperationException("Set a bundle path first.");
-        if (fileSystem.FileExists(bundlePath)) throw new InvalidOperationException($"\"{bundlePath}\" already exists, so it is left alone. Choose a new name.");
+        if (fileSystem.DirectoryExists(bundlePath)) throw new InvalidOperationException($"\"{bundlePath}\" already exists, so it is left alone. Choose a new name.");
 
         var distro = settings.WslDistroName.Trim();
         if (!Settings.IsSafeDistroName(distro)) throw new InvalidOperationException($"\"{distro}\" is not a name QwenTray can pass to wsl.exe.");
         if (!await wsl.DistroExistsAsync(distro, cancellationToken)) throw new InvalidOperationException($"The \"{distro}\" distro does not exist, so there is nothing to export.");
 
-        var usedBytes = await MeasureDistroAsync(distro, cancellationToken);
-        // The tar lands on this machine and only the finished bundle goes to the destination, so the two
-        // volumes are checked for one copy each rather than one volume for both.
-        var neededBytes = usedBytes > 0 ? usedBytes + HeadroomBytes : 0;
-        RequireFreeSpace(BackupDirectory, neededBytes, "hold the exported filesystem while the bundle is written");
-        RequireFreeSpace(bundlePath, neededBytes, "write the bundle");
-
-        fileSystem.CreateDirectory(BackupDirectory);
-        var tempTar = Path.Combine(BackupDirectory, $".{Path.GetFileNameWithoutExtension(bundlePath)}.{Guid.NewGuid():N}.tar");
-        try
+        var sourceVhd = location.TryFindVhdPath(distro);
+        if (sourceVhd is null || !fileSystem.FileExists(sourceVhd))
         {
-            // A distro that is still being written to would land in the tar half-written.
-            var stopped = await wsl.TerminateAsync(distro, cancellationToken);
-            if (!stopped.Succeeded) throw new InvalidOperationException($"Could not stop the \"{distro}\" distro to export it. {stopped.Output}");
-
-            var exported = await wsl.ExportAsync(distro, tempTar, cancellationToken);
-            if (!exported.Succeeded) throw new InvalidOperationException($"Could not export the \"{distro}\" distro. {exported.Output}");
-
-            var manifest = new BackupManifest
-            {
-                CreatedAtUtc = DateTimeOffset.UtcNow,
-                QwenTrayVersion = appInfo.Version.ToString(),
-                WslDistroName = distro,
-                // The registry value names this machine's executable, so only the intent travels.
-                AutostartEnabled = autostart.IsEnabled(),
-                DistroTarBytes = fileSystem.GetFileInfo(tempTar).Length,
-                SourceUserName = Environment.UserName,
-            };
-
-            await bundle.WriteAsync(
-                bundlePath,
-                manifest,
-                JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings),
-                tempTar,
-                cancellationToken);
-
-            var bundleBytes = fileSystem.GetFileInfo(bundlePath).Length;
-            logger.LogInformation("Exported the {Distro} distro to {Bundle} ({BundleBytes} bytes).", distro, bundlePath, bundleBytes);
-            return new ExportResult(bundlePath, bundleBytes, usedBytes);
+            throw new InvalidOperationException($"QwenTray cannot find the virtual disk the \"{distro}\" distro boots from, so there is nothing to export.");
         }
-        finally
+
+        var vhdBytes = fileSystem.GetFileInfo(sourceVhd).Length;
+        RequireFreeSpace(bundlePath, vhdBytes + HeadroomBytes, "hold a copy of the distro disk");
+
+        // A disk that is still mounted holds whatever its writer had in flight, and wsl will not hand it
+        // over while it holds it.
+        var stopped = await wsl.TerminateAsync(distro, cancellationToken);
+        if (!stopped.Succeeded) throw new InvalidOperationException($"Could not stop the \"{distro}\" distro to export it. {stopped.Output}");
+
+        var manifest = new BackupManifest
         {
-            if (fileSystem.FileExists(tempTar)) fileSystem.DeleteFile(tempTar);
-        }
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            QwenTrayVersion = appInfo.Version.ToString(),
+            WslDistroName = distro,
+            // The registry value names this machine's executable, so only the intent travels.
+            AutostartEnabled = autostart.IsEnabled(),
+            DistroVhdBytes = vhdBytes,
+            SourceUserName = Environment.UserName,
+        };
+
+        await bundle.WriteAsync(
+            bundlePath,
+            manifest,
+            JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings),
+            sourceVhd,
+            cancellationToken);
+
+        var bundleBytes = fileSystem.GetFiles(bundlePath).Sum(path => fileSystem.GetFileInfo(path).Length);
+        logger.LogInformation("Exported the {Distro} distro to {Bundle} ({BundleBytes} bytes).", distro, bundlePath, bundleBytes);
+        return new ExportResult(bundlePath, bundleBytes);
     }
 
     /// <summary>
-    /// Registers the bundle's filesystem as its distro and applies its settings. The bundle's own distro
-    /// name wins over whatever the settings file says, so the app always points at what was just imported.
+    /// Registers the bundle's disk as its distro and applies its settings. The bundle's own distro name
+    /// wins over whatever the settings file says, so the app always points at what was just imported.
     /// </summary>
     public async Task<BackupManifest> ImportAsync(string bundlePath, CancellationToken cancellationToken)
     {
@@ -133,15 +130,16 @@ public sealed class DistroBackupService(
 
         RequireFreeSpace(
             WslRoot,
-            manifest.DistroTarBytes > 0 ? manifest.DistroTarBytes * 2 + HeadroomBytes : 0,
+            manifest.DistroVhdBytes > 0 ? manifest.DistroVhdBytes + HeadroomBytes : 0,
             "import");
 
-        var workDirectory = Path.Combine(TransferDirectory, Guid.NewGuid().ToString("N"));
+        // The disk is copied to a staging folder first because it is the step that can fail after minutes
+        // of work, and until it finishes the distro already on this machine is still the one that boots.
+        var staging = Path.Combine(TransferDirectory, Guid.NewGuid().ToString("N"));
         try
         {
-            // Unpacking first means a bundle that turns out to be unreadable or short of space leaves the
-            // existing distro where it was.
-            var tar = await bundle.ExtractTarAsync(bundlePath, workDirectory, cancellationToken);
+            var stagedVhd = BackupBundle.VhdPathIn(staging);
+            await bundle.CopyVhdOutAsync(bundlePath, stagedVhd, cancellationToken);
 
             if (await wsl.DistroExistsAsync(distro, cancellationToken))
             {
@@ -150,9 +148,14 @@ public sealed class DistroBackupService(
                 if (!removed.Succeeded) throw new InvalidOperationException($"Could not remove the existing \"{distro}\" distro to make room for the bundle. {removed.Output}");
             }
 
+            // Resolved only now, because a distro can be registered straight out of the folder this one is
+            // about to be copied into, and the copy would land inside a disk that is about to be deleted.
             var target = ResolveImportTarget(distro);
-            var result = await wsl.ImportAsync(distro, target, tar, cancellationToken);
-            if (!result.Succeeded) throw new InvalidOperationException($"Could not import the \"{distro}\" distro. {result.Output}");
+            var targetVhd = BackupBundle.VhdPathIn(target);
+            fileSystem.MoveFile(stagedVhd, targetVhd, overwrite: false);
+
+            var result = await wsl.ImportInPlaceAsync(distro, targetVhd, cancellationToken);
+            if (!result.Succeeded) throw new InvalidOperationException($"Could not register the distro from the bundle. {result.Output}");
 
             provisioner.WriteWslConfig();
 
@@ -166,30 +169,11 @@ public sealed class DistroBackupService(
         }
         finally
         {
-            if (fileSystem.DirectoryExists(workDirectory))
+            if (fileSystem.DirectoryExists(staging))
             {
-                fileSystem.DeleteDirectory(workDirectory, recursive: true);
+                fileSystem.DeleteDirectory(staging, recursive: true);
             }
         }
-    }
-
-    /// <summary>
-    /// Bytes actually stored inside the distro, which is what the tar will hold. The VHDX on disk is
-    /// sparse, so its size overstates the job. Nothing guarantees this answers, and a run that really is
-    /// out of space says so itself, so a failed measurement only drops the preflight.
-    /// </summary>
-    internal static string BuildMeasureScript() => "df -B1 --output=used / | tail -1 | tr -d ' \t'";
-
-    private async Task<long> MeasureDistroAsync(string distro, CancellationToken cancellationToken)
-    {
-        var result = await wsl.RunRootScriptAsync(distro, BuildMeasureScript(), cancellationToken);
-        if (!result.Succeeded || !long.TryParse(WslDistro.ParseVersion(result.Output), out var usedBytes))
-        {
-            logger.LogWarning("Could not measure the space used inside {Distro}, so the free space check is skipped.", distro);
-            return 0;
-        }
-
-        return usedBytes;
     }
 
     private static Settings ReadSettings(string json)

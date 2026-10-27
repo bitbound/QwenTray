@@ -25,13 +25,14 @@ internal sealed class SettingsPages
         var fileSystem = new FakeFileSystem();
         var wsl = new FakeWslDistro();
         var store = new SettingsStore(fileSystem);
-        var autostart = new RegistryAutostartService(new FakeRegistry());
+        var registry = new FakeRegistry();
+        var autostart = new RegistryAutostartService(registry);
         var provisioner = new WslDistroProvisioner(wsl, fileSystem, null!, NullLogger<WslDistroProvisioner>.Instance);
         var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
         Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
         Hold = new DistroHold();
-        var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
+        var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), new WslDistroLocation(registry), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
         Environment = new EnvironmentViewModel(
             Settings, store, supervisor, wsl, provisioner,
             new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance),

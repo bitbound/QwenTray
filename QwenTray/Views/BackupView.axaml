@@ -29,15 +29,15 @@
 
             <TextBlock Classes="caption"
                        TextWrapping="Wrap"
-                       Text="One file carrying the whole distro together with this machine's QwenTray settings. An import protects those settings again for the account on the machine it lands on, so they travel unlocked and the bundle has to be kept somewhere private." />
+                       Text="A folder carrying the virtual disk the distro boots from, together with this machine's QwenTray settings. An import protects those settings again for the account on the machine it lands on, so they travel unlocked and the bundle has to be kept somewhere private." />
 
             <Grid ColumnDefinitions="220,*" RowDefinitions="Auto">
-              <TextBlock Grid.Row="0" Classes="field" Text="Bundle file" />
+              <TextBlock Grid.Row="0" Classes="field" Text="Bundle folder" />
               <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
                 <TextBox Text="{Binding BundlePath}" />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
-                           Text="Export writes to this path and refuses to overwrite a file that is already there. For an import, point it at a bundle made earlier." />
+                           Text="Export creates this folder and refuses to touch one that is already there. For an import, point it at a bundle folder made earlier." />
               </StackPanel>
             </Grid>
 

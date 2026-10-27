@@ -86,16 +86,20 @@ editing its configuration, without granting the daemon those rights.
 Both backups live on the **Backup** page. Neither reads or writes the Windows `%USERPROFILE%\.qwen`
 folder.
 
-**WSL backup** exports the whole distro plus this machine's QwenTray settings into one bundle, and
-imports a bundle made earlier.
+**WSL backup** exports a distro by copying the virtual disk it boots from, together with this machine's
+QwenTray settings, into a bundle folder named for the time it ran. An import copies that disk out of the
+bundle and registers it where the copy lies, so the bundle keeps its own copy and stays a backup. The
+distro is stopped for an export and stays stopped, because a disk that is still mounted holds whatever its
+writer had in flight.
 
 **Configuration backup** writes a ZIP of the active profile's Qwen configuration from inside the distro.
 **Restore backup** writes those files back. The list holds absolute Linux paths, one per line, and
 defaults to `QWEN.md`, `agents`, `rules`, `memories`, `skills`, `workflows`, and `settings.json` under
 `~/.qwen`. A folder includes every file beneath it, and any path can be added or removed.
 
-Both move files over the `\\wsl.localhost` share, so the distro has to be running. `settings.json` is
-now inside the default list, so an archive carries live API keys. Keep it somewhere private.
+The configuration backup moves files over the `\\wsl.localhost` share, so the distro has to be running for
+it. An archive carries live API keys, so keep it somewhere private, and a WSL bundle carries the bearer
+token and every profile's sign-ins, so the same applies to it.
 
 ## Code Signing
 
