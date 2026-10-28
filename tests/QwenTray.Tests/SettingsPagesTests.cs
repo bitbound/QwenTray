@@ -24,14 +24,16 @@ internal sealed class SettingsPages
 
         var fileSystem = new FakeFileSystem();
         var wsl = new FakeWslDistro();
+        Wsl = wsl;
         var store = new SettingsStore(fileSystem);
-        var autostart = new RegistryAutostartService(new FakeRegistry());
+        var registry = new FakeRegistry();
+        var autostart = new RegistryAutostartService(registry);
         var provisioner = new WslDistroProvisioner(wsl, fileSystem, null!, NullLogger<WslDistroProvisioner>.Instance);
         var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
         Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
         Hold = new DistroHold();
-        var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
+        var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), new WslDistroLocation(registry), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
         Environment = new EnvironmentViewModel(
             Settings, store, supervisor, wsl, provisioner,
             new DevToolInstaller(wsl, NullLogger<DevToolInstaller>.Instance),
@@ -63,6 +65,9 @@ internal sealed class SettingsPages
 
     /// <summary>The one hold the pages share, so a test can raise it the way a running backup does.</summary>
     public DistroHold Hold { get; }
+
+    /// <summary>The distro double behind every page, so a test can answer as an absent distro would.</summary>
+    public FakeWslDistro Wsl { get; }
 
     public EnvironmentViewModel Environment { get; }
 
@@ -534,5 +539,34 @@ public sealed class SettingsPageBusyGateTests
         pages.Identity.SelectedProfile = work;
 
         Assert.Equal("/opt/qwen/bin/qwen", pages.Server.QwenExecutable);
+    }
+}
+
+public sealed class BackupPageTests
+{
+    [Fact]
+    public async Task OpeningTheBackupPageFirstStillEnablesTheExport()
+    {
+        // The export gates on the distro existing, which is an answer only the Environment page's probe
+        // used to produce. A session that opened this page first never ran that probe, so the button
+        // stayed dead for the rest of the session however the folder was filled in.
+        var pages = new SettingsPages();
+
+        await pages.Backup.InitializeAsync();
+
+        Assert.True(pages.Backup.CanExportBundle);
+    }
+
+    [Fact]
+    public async Task TheExportWaitsForADistroThatWasNeverRegistered()
+    {
+        var pages = new SettingsPages();
+        pages.Wsl.Exists = false;
+
+        await pages.Backup.InitializeAsync();
+
+        Assert.False(pages.Backup.CanExportBundle);
+        // An import reads a folder rather than the live distro, so a missing distro is none of its business.
+        Assert.True(pages.Backup.CanImportBundle);
     }
 }

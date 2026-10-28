@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Bitbound.SystemAbstractions.FileSystem;
@@ -11,7 +10,8 @@ namespace QwenTray.Services;
 /// </summary>
 public sealed record BackupManifest
 {
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>Two, because a bundle carries the distro's virtual disk. Version one held a filesystem tar.</summary>
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public DateTimeOffset CreatedAtUtc { get; set; }
@@ -21,7 +21,7 @@ public sealed record BackupManifest
     /// <summary>Whether Start with Windows was on, carried as a flag because the registry value names the source machine's executable.</summary>
     public bool AutostartEnabled { get; set; }
 
-    public long DistroTarBytes { get; set; }
+    public long DistroVhdBytes { get; set; }
     public string SourceUserName { get; set; } = "";
 }
 
@@ -29,70 +29,78 @@ public sealed record BackupManifest
 public sealed record BundleContents(BackupManifest Manifest, string SettingsJson);
 
 /// <summary>
-/// Reads and writes the single-file bundle: a zip holding a manifest, the settings as plaintext, and the
-/// tar that <see cref="IWslDistro.ExportAsync"/> wrote.
+/// Reads and writes a bundle: a folder holding a manifest, the settings as plaintext, and the
+/// <c>ext4.vhdx</c> the distro boots from. The disk is a sibling of the two small files rather than a
+/// member of an archive, because an import hands that same file straight to <c>wsl --import-in-place</c>
+/// and a copy made on the way in or out would be the whole cost of the operation.
 /// </summary>
 public sealed class BackupBundle(IFileSystem fileSystem)
 {
     public const string ManifestEntry = "manifest.json";
     public const string SettingsEntry = "settings.json";
-    public const string TarEntry = "distro.tar";
-
-    public static string TarPathIn(string destinationDirectory) => Path.Combine(destinationDirectory, TarEntry);
+    public const string VhdEntry = WslDistroLocation.VhdFileName;
 
     /// <summary>
-    /// Writes the bundle, refusing a path that already holds a file so a mistyped name cannot destroy an
-    /// earlier backup. The tar is stored rather than compressed, because it is already dense and would
-    /// cost minutes to deflate for almost nothing.
+    /// Bytes handled per step of a disk copy. The disk is read once either way, so this is only about
+    /// keeping the number of writes down.
     /// </summary>
-    public async Task WriteAsync(string bundlePath, BackupManifest manifest, string settingsJson, string tarPath, CancellationToken cancellationToken)
+    private const int ChunkBytes = 1024 * 1024;
+
+    public static string VhdPathIn(string bundleDirectory) => Path.Combine(bundleDirectory, VhdEntry);
+
+    /// <summary>
+    /// Writes the bundle into a folder that does not exist yet, so a mistyped name cannot destroy an
+    /// earlier backup. The folder appears only once its three files are complete, which keeps a run that
+    /// died halfway from leaving something that looks like a backup.
+    /// </summary>
+    public async Task WriteAsync(string bundleDirectory, BackupManifest manifest, string settingsJson, string sourceVhdPath, CancellationToken cancellationToken)
     {
-        if (fileSystem.FileExists(bundlePath))
+        if (string.IsNullOrWhiteSpace(bundleDirectory)) throw new InvalidOperationException("Set a bundle path first.");
+        if (fileSystem.DirectoryExists(bundleDirectory))
         {
-            throw new InvalidOperationException($"\"{bundlePath}\" already exists. Change the bundle name rather than overwrite it.");
+            throw new InvalidOperationException($"\"{bundleDirectory}\" already exists. Change the bundle name rather than overwrite it.");
         }
 
-        var parent = Path.GetDirectoryName(bundlePath);
-        if (!string.IsNullOrEmpty(parent))
+        if (!fileSystem.FileExists(sourceVhdPath))
         {
-            fileSystem.CreateDirectory(parent);
+            throw new FileNotFoundException($"The distro's virtual disk is missing at {sourceVhdPath}.", sourceVhdPath);
         }
 
-        if (!fileSystem.FileExists(tarPath))
+        var parent = Path.GetDirectoryName(bundleDirectory);
+        if (string.IsNullOrEmpty(parent)) parent = ".";
+        fileSystem.CreateDirectory(parent);
+
+        var staging = Path.Combine(parent, $".{Path.GetFileName(bundleDirectory)}.staging-{Guid.NewGuid():N}");
+        try
         {
-            throw new FileNotFoundException($"The exported filesystem is missing at {tarPath}.", tarPath);
+            fileSystem.CreateDirectory(staging);
+            await fileSystem.WriteAllBytesAsync(
+                Path.Combine(staging, ManifestEntry),
+                JsonSerializer.SerializeToUtf8Bytes(manifest, QwenTrayJsonContext.Default.BackupManifest),
+                cancellationToken);
+            await fileSystem.WriteAllBytesAsync(
+                Path.Combine(staging, SettingsEntry),
+                Encoding.UTF8.GetBytes(settingsJson),
+                cancellationToken);
+            await CopyAsync(sourceVhdPath, VhdPathIn(staging), cancellationToken);
+
+            fileSystem.MoveDirectory(staging, bundleDirectory);
         }
-
-        using var archive = new ZipArchive(
-            fileSystem.CreateFileStream(bundlePath, FileMode.CreateNew, FileAccess.Write, FileShare.None),
-            ZipArchiveMode.Create,
-            leaveOpen: false);
-
-        await WriteBytesAsync(
-            archive,
-            ManifestEntry,
-            JsonSerializer.SerializeToUtf8Bytes(manifest, QwenTrayJsonContext.Default.BackupManifest),
-            cancellationToken);
-        await WriteBytesAsync(
-            archive,
-            SettingsEntry,
-            Encoding.UTF8.GetBytes(settingsJson),
-            cancellationToken);
-
-        var entry = archive.CreateEntry(TarEntry, CompressionLevel.NoCompression);
-        await using (var target = entry.Open())
-        await using (var source = fileSystem.OpenFileStream(tarPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        finally
         {
-            await source.CopyToAsync(target, cancellationToken);
+            if (fileSystem.DirectoryExists(staging)) fileSystem.DeleteDirectory(staging, recursive: true);
         }
     }
 
-    public async Task<BundleContents> ReadAsync(string bundlePath, CancellationToken cancellationToken)
+    public async Task<BundleContents> ReadAsync(string bundleDirectory, CancellationToken cancellationToken)
     {
-        using var archive = OpenArchive(bundlePath);
+        if (!fileSystem.DirectoryExists(bundleDirectory))
+        {
+            throw new FileNotFoundException($"No bundle at {bundleDirectory}.", bundleDirectory);
+        }
 
         var manifest = JsonSerializer.Deserialize(
-            await ReadEntryBytesAsync(archive, ManifestEntry, cancellationToken),
+            await ReadEntryBytesAsync(bundleDirectory, ManifestEntry, cancellationToken),
             QwenTrayJsonContext.Default.BackupManifest) ?? throw new InvalidOperationException($"The bundle has no usable {ManifestEntry}.");
 
         if (manifest.SchemaVersion > BackupManifest.CurrentSchemaVersion)
@@ -107,61 +115,64 @@ public sealed class BackupBundle(IFileSystem fileSystem)
 
         return new BundleContents(
             manifest,
-            Encoding.UTF8.GetString(await ReadEntryBytesAsync(archive, SettingsEntry, cancellationToken)));
+            Encoding.UTF8.GetString(await ReadEntryBytesAsync(bundleDirectory, SettingsEntry, cancellationToken)));
     }
 
     /// <summary>
-    /// Copies the filesystem tar out of the bundle, because <c>wsl --import</c> reads a file rather than
-    /// an archive member. Only the one named member is written, so a member crafted to escape the
-    /// destination directory is never opened.
+    /// Copies the bundle's disk to <paramref name="destinationVhdPath"/>, which is where the distro will
+    /// boot it from. The bundle keeps its own copy, so a bundle stays a backup after an import rather than
+    /// becoming something whose deletion destroys a live distro.
     /// </summary>
-    public async Task<string> ExtractTarAsync(string bundlePath, string destinationDirectory, CancellationToken cancellationToken)
+    public async Task<string> CopyVhdOutAsync(string bundleDirectory, string destinationVhdPath, CancellationToken cancellationToken)
     {
-        fileSystem.CreateDirectory(destinationDirectory);
-
-        using var archive = OpenArchive(bundlePath);
-        var target = TarPathIn(destinationDirectory);
-
-        await using (var output = fileSystem.CreateFileStream(target, FileMode.Create, FileAccess.Write, FileShare.None))
-        await using (var input = await ReadEntryStreamAsync(archive, TarEntry, cancellationToken))
+        var source = VhdPathIn(bundleDirectory);
+        if (!fileSystem.FileExists(source))
         {
-            await input.CopyToAsync(output, cancellationToken);
+            throw new FileNotFoundException($"The bundle at {bundleDirectory} has no {VhdEntry}.", source);
         }
 
-        return target;
+        var parent = Path.GetDirectoryName(destinationVhdPath);
+        if (!string.IsNullOrEmpty(parent)) fileSystem.CreateDirectory(parent);
+
+        await CopyAsync(source, destinationVhdPath, cancellationToken);
+        return destinationVhdPath;
     }
 
-    private ZipArchive OpenArchive(string bundlePath)
+    private async Task<byte[]> ReadEntryBytesAsync(string bundleDirectory, string entry, CancellationToken cancellationToken)
     {
-        if (!fileSystem.FileExists(bundlePath))
+        var path = Path.Combine(bundleDirectory, entry);
+        if (!fileSystem.FileExists(path)) throw new FileNotFoundException($"The bundle has no {entry}.", path);
+
+        return await fileSystem.ReadAllBytesAsync(path);
+    }
+
+    private async Task CopyAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[ChunkBytes];
+
+        await using var source = fileSystem.OpenFileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        await using var target = fileSystem.CreateFileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
         {
-            throw new FileNotFoundException($"No bundle at {bundlePath}.", bundlePath);
+            // A disk image still holds what its owner deleted, and a distro that was never trimmed carries
+            // whole regions of zero. Writing those out costs a full pass over bytes nobody will read, so
+            // the position moves past them instead and the region stays unallocated at the destination.
+            if (ContainsData(buffer.AsSpan(0, read)))
+            {
+                await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            }
+            else
+            {
+                target.Position += read;
+            }
         }
 
-        return new ZipArchive(
-            fileSystem.OpenFileStream(bundlePath, FileMode.Open, FileAccess.Read, FileShare.Read),
-            ZipArchiveMode.Read,
-            leaveOpen: false);
+        // The loop above never writes a run of zeros at the end of the file, and the vhdx footer has to sit
+        // at the very end, so the length is stated rather than left to the last write.
+        target.SetLength(source.Length);
     }
 
-    private static async Task WriteBytesAsync(ZipArchive archive, string name, byte[] bytes, CancellationToken cancellationToken)
-    {
-        await using var stream = archive.CreateEntry(name, CompressionLevel.Optimal).Open();
-        await stream.WriteAsync(bytes, cancellationToken);
-    }
-
-    private static async Task<byte[]> ReadEntryBytesAsync(ZipArchive archive, string name, CancellationToken cancellationToken)
-    {
-        await using var stream = await ReadEntryStreamAsync(archive, name, cancellationToken);
-        using var buffer = new MemoryStream();
-        await stream.CopyToAsync(buffer, cancellationToken);
-        return buffer.ToArray();
-    }
-
-    private static Task<Stream> ReadEntryStreamAsync(ZipArchive archive, string name, CancellationToken cancellationToken)
-    {
-        // An exact match, because a malicious archive can name a member "../../manifest.json".
-        var entry = archive.GetEntry(name) ?? throw new InvalidOperationException($"The bundle has no {name}.");
-        return entry.OpenAsync(cancellationToken);
-    }
+    internal static bool ContainsData(ReadOnlySpan<byte> chunk) => chunk.IndexOfAnyExcept((byte)0) >= 0;
 }

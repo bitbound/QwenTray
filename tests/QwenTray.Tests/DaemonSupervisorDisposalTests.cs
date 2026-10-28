@@ -20,9 +20,7 @@ internal sealed class FakeWslDistro : IWslDistro
 
     public List<string> TerminatedDistros { get; } = [];
 
-    public List<(string Distro, string TarPath)> Exports { get; } = [];
-
-    public List<(string Distro, string TargetDirectory, string TarPath)> Imports { get; } = [];
+    public List<(string Distro, string VhdPath)> ImportInPlaces { get; } = [];
 
     /// <summary>How many times a caller tried to boot the distro through this double.</summary>
     public int RunScriptCalls { get; private set; }
@@ -35,8 +33,6 @@ internal sealed class FakeWslDistro : IWslDistro
 
     public int ImportExitCode { get; set; }
 
-    public int ExportExitCode { get; set; }
-
     public string ScriptOutput { get; set; } = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@qwentray";
 
     public int ScriptExitCode { get; set; }
@@ -47,9 +43,12 @@ internal sealed class FakeWslDistro : IWslDistro
     /// </summary>
     public bool ScriptTimedOut { get; set; }
 
+    /// <summary>Makes the listing answer the way a distro that was never registered would.</summary>
+    public bool Exists { get; set; } = true;
+
     public int UnregisterExitCode { get; set; }
 
-    public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(true);
+    public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(Exists);
 
     public async Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
@@ -90,15 +89,9 @@ internal sealed class FakeWslDistro : IWslDistro
         return Task.FromResult(new WslCommandResult(UnregisterExitCode, UnregisterExitCode == 0 ? string.Empty : "The distribution does not exist."));
     }
 
-    public Task<WslCommandResult> ExportAsync(string distro, string tarPath, CancellationToken cancellationToken)
+    public Task<WslCommandResult> ImportInPlaceAsync(string distro, string vhdPath, CancellationToken cancellationToken)
     {
-        Exports.Add((distro, tarPath));
-        return Task.FromResult(new WslCommandResult(ExportExitCode, ExportExitCode == 0 ? string.Empty : "The distribution is not found."));
-    }
-
-    public Task<WslCommandResult> ImportAsync(string distro, string targetDirectory, string tarPath, CancellationToken cancellationToken)
-    {
-        Imports.Add((distro, targetDirectory, tarPath));
+        ImportInPlaces.Add((distro, vhdPath));
         return Task.FromResult(new WslCommandResult(ImportExitCode, ImportExitCode == 0 ? string.Empty : "The distribution name already exists."));
     }
 }

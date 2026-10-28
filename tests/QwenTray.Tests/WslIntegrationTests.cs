@@ -27,8 +27,7 @@ public sealed class WslCommandTests
         Assert.Equal(WslDistro.CommandTimeout, WslDistro.ScriptInvocation("D", "u", "s").Timeout);
 
         Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.InstallDistroInvocation("D").Timeout);
-        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.ExportInvocation("D", "t").Timeout);
-        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.ImportInvocation("D", "l", "t").Timeout);
+        Assert.Equal(WslDistro.LongCommandTimeout, WslDistro.ImportInPlaceInvocation("D", "v").Timeout);
     }
 
     [Fact]
@@ -45,8 +44,7 @@ public sealed class WslCommandTests
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ListDistrosInvocation().Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.InstallDistroInvocation("D").Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.TerminateInvocation("D").Encoding.CodePage);
-        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ExportInvocation("D", "t").Encoding.CodePage);
-        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ImportInvocation("D", "l", "t").Encoding.CodePage);
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ImportInPlaceInvocation("D", "v").Encoding.CodePage);
         Assert.Equal(Encoding.UTF8.CodePage, WslDistro.ScriptInvocation("D", "u", "s").Encoding.CodePage);
     }
 
@@ -132,21 +130,18 @@ public sealed class WslCommandTests
     }
 
     [Fact]
-    public void ExportNamesItsFileAndImportNamesItsTargetAndItsVersion()
+    public void ImportInPlaceNamesTheDistroAndTheDiskAndCarriesNoVersion()
     {
-        Assert.Equal("""--export QwenTray D:\backups\distro.tar""", WslDistro.ExportInvocation("QwenTray", @"D:\backups\distro.tar").Arguments);
-
-        // The version is named because a host whose default is WSL 1 would otherwise register the
-        // filesystem as something QwenTray cannot boot.
+        // No --version is named, because an ext4 virtual disk only ever backs a generation 2 distro.
         Assert.Equal(
-            """--import QwenTray D:\wsl\QwenTray D:\backups\distro.tar --version 2""",
-            WslDistro.ImportInvocation("QwenTray", @"D:\wsl\QwenTray", @"D:\backups\distro.tar").Arguments);
+            """--import-in-place QwenTray D:\wsl\QwenTray\ext4.vhdx""",
+            WslDistro.ImportInPlaceInvocation("QwenTray", @"D:\wsl\QwenTray\ext4.vhdx").Arguments);
 
         // A bundle on a USB drive or in a user's folder usually has a space in it, and that path has to
         // arrive as one argument rather than several.
         Assert.Equal(
-            "--export QwenTray \"E:\\My Backups\\distro.tar\"",
-            WslDistro.ExportInvocation("QwenTray", @"E:\My Backups\distro.tar").Arguments);
+            "--import-in-place QwenTray \"E:\\My Backups\\ext4.vhdx\"",
+            WslDistro.ImportInPlaceInvocation("QwenTray", @"E:\My Backups\ext4.vhdx").Arguments);
     }
 
     [Fact]

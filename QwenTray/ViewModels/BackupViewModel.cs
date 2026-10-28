@@ -71,7 +71,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
 
         // The shared save reads these fields even when the user never opened this page, so the singleton
         // has to carry them from construction.
-        BundlePath = DistroBackupService.DefaultBundlePath(_settings.BundleDirectory);
+        BundlePath = DistroBackupService.DefaultBundleDirectory(_settings.BundleDirectory);
         ConfigPaths = string.Join(Environment.NewLine, EffectiveConfigPaths());
         ConfigArchivePath = QwenConfigArchiveService.DefaultArchivePath(_settings.ConfigArchiveDirectory);
     }
@@ -92,12 +92,17 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         OnPropertyChanged(nameof(CanArchiveConfig));
     }
 
-    protected override Task OnInitializeAsync()
+    protected override async Task OnInitializeAsync()
     {
+        // Export gates on the distro existing, and that answer only comes from the Environment page's
+        // probe. A session that opens this page first never runs it, which left Export disabled for the
+        // rest of the session. A probe already made is not repeated, so a revisit costs nothing.
+        if (!_environment.HasCheckedDistro) await _environment.RefreshEnvironmentAsync();
+
         // A typed path survives a revisit, while an emptied field gets a fresh name in the stored folder.
         if (string.IsNullOrWhiteSpace(BundlePath))
         {
-            BundlePath = DistroBackupService.DefaultBundlePath(_settings.BundleDirectory);
+            BundlePath = DistroBackupService.DefaultBundleDirectory(_settings.BundleDirectory);
         }
 
         ConfigPaths = string.Join(Environment.NewLine, EffectiveConfigPaths());
@@ -105,13 +110,11 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         {
             ConfigArchivePath = QwenConfigArchiveService.DefaultArchivePath(_settings.ConfigArchiveDirectory);
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Writes the distro and this machine's settings into a bundle. Nothing is destroyed, but the distro
-    /// is stopped so its filesystem is not half-written into the archive, and it stays stopped.
+    /// Copies the distro's disk and this machine's settings into a bundle folder. Nothing is destroyed, but
+    /// the distro is stopped so its disk is not copied while it is mounted, and it stays stopped.
     /// </summary>
     [RelayCommand]
     private async Task ExportBundleAsync()
@@ -125,7 +128,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
 
         _settings.Profiles = _save.CommitProfilesForDistroWork();
         _hold.IsHeld = true;
-        BundleProgress = "Stopping the distro and writing its filesystem into the bundle. This takes a few minutes.";
+        BundleProgress = "Stopping the distro and copying its disk into the bundle folder. This takes a few minutes.";
         try
         {
             await using var distroHold = await _supervisor.HoldAsync("exporting the bundle");
@@ -184,7 +187,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         }
 
         _hold.IsHeld = true;
-        BundleProgress = "Unpacking the bundle and registering the distro. This takes a few minutes.";
+        BundleProgress = "Copying the disk out of the bundle and registering the distro. This takes a few minutes.";
         try
         {
             await using var distroHold = await _supervisor.HoldAsync("importing the bundle");
