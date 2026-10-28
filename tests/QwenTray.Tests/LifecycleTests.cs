@@ -107,6 +107,19 @@ public sealed class DaemonLogPathTests
         Assert.Null(await supervisor.ResolveLogPathAsync(CancellationToken.None));
         Assert.Empty(wsl.Scripts);
     }
+
+    [Fact]
+    public async Task AStoppedDistroIsNotBootedToFindTheLog()
+    {
+        // The Daemon page resolves the path while it builds itself, which happens as the tray starts. An
+        // answer that costs a script call would boot a distro the user left stopped just by launching the
+        // tray, so the question is asked in a way that cannot.
+        var wsl = new FakeWslDistro { DistroRunning = false, ScriptOutput = "/home/qwen/.qwen/debug/daemon/daemon.log" };
+        var supervisor = new DaemonSupervisor(new Settings(), wsl, new SystemdUserService(wsl));
+
+        Assert.Null(await supervisor.ResolveLogPathAsync(CancellationToken.None));
+        Assert.Equal(0, wsl.RunScriptCalls);
+    }
 }
 
 public sealed class WebShellAddressTests

@@ -81,6 +81,14 @@ public sealed class DaemonSupervisor : IAsyncDisposable
             return null;
         }
 
+        // A distro that is down has no daemon and no log being written, so the same reasoning applies to
+        // it: the Daemon page asks this while building itself, and answering by booting the distro would
+        // mean merely opening the tray starts one the user left stopped.
+        if (!await _wsl.DistroIsRunningAsync(_settings.WslDistroName, cancellationToken))
+        {
+            return null;
+        }
+
         var profile = _settings.ResolveActiveProfile();
         if (!IdentityProfile.IsValidLinuxUser(profile.LinuxUser))
         {

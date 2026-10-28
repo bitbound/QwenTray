@@ -31,6 +31,12 @@ internal sealed class FakeWslDistro : IWslDistro
     /// <summary>When set, running a script throws the way a missing wsl.exe would.</summary>
     public Exception? ScriptFailure { get; set; }
 
+    /// <summary>Whether <see cref="DistroIsRunningAsync"/> reports the distro as booted.</summary>
+    public bool DistroRunning { get; set; } = true;
+
+    /// <summary>What a root script answers, for a caller that asks the distro whether it is provisioned.</summary>
+    public string RootScriptOutput { get; set; } = string.Empty;
+
     public int ImportExitCode { get; set; }
 
     public string ScriptOutput { get; set; } = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test@qwentray";
@@ -49,6 +55,8 @@ internal sealed class FakeWslDistro : IWslDistro
     public int UnregisterExitCode { get; set; }
 
     public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(Exists);
+
+    public Task<bool> DistroIsRunningAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(DistroRunning);
 
     public async Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
@@ -71,7 +79,7 @@ internal sealed class FakeWslDistro : IWslDistro
     public Task<WslCommandResult> RunRootScriptAsync(string distro, string script, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
         RootScripts.Add(script);
-        return Task.FromResult(new WslCommandResult(0, string.Empty));
+        return Task.FromResult(new WslCommandResult(0, RootScriptOutput));
     }
 
     public Task<WslCommandResult> InstallDistroAsync(string distro, CancellationToken cancellationToken)

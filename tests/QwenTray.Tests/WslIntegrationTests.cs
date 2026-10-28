@@ -15,6 +15,17 @@ public sealed class WslCommandTests
     }
 
     [Fact]
+    public void TheRunningCheckNamesTheRunningListRatherThanACommandInsideTheDistro()
+    {
+        // Asking by name is what makes this the one question about a distro that boots nothing. Measured
+        // on this box, a stopped distro stays stopped across it, while the same question asked as a
+        // command, such as a test on a marker file, boots the distro on the way to answering. The names
+        // come back the way every wsl.exe subcommand writes them, so the existing parser reads them.
+        Assert.Equal("--list --running --quiet", WslDistro.ListRunningDistrosInvocation().Arguments);
+        Assert.Equal(["Ubuntu", "QwenTray"], WslDistro.ParseDistroNames("Ubuntu\r\n\0QwenTray\0"));
+    }
+
+    [Fact]
     public void EveryInvocationNamesHowLongItMayTake()
     {
         // A wedged distro accepts the process and then answers nothing, so this bound is what turns that
@@ -22,6 +33,7 @@ public sealed class WslCommandTests
         // tightly, and the ones that move a whole filesystem or install packages get the long budget so
         // that they are not aborted mid-flight.
         Assert.Equal(WslDistro.CommandTimeout, WslDistro.ListDistrosInvocation().Timeout);
+        Assert.Equal(WslDistro.CommandTimeout, WslDistro.ListRunningDistrosInvocation().Timeout);
         Assert.Equal(WslDistro.CommandTimeout, WslDistro.TerminateInvocation("D").Timeout);
         Assert.Equal(WslDistro.CommandTimeout, WslDistro.UnregisterInvocation("D").Timeout);
         Assert.Equal(WslDistro.CommandTimeout, WslDistro.ScriptInvocation("D", "u", "s").Timeout);
@@ -42,6 +54,7 @@ public sealed class WslCommandTests
     {
         // wsl.exe writes its own output as UTF-16LE, but passes a child command's stdout through as UTF-8.
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ListDistrosInvocation().Encoding.CodePage);
+        Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ListRunningDistrosInvocation().Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.InstallDistroInvocation("D").Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.TerminateInvocation("D").Encoding.CodePage);
         Assert.Equal(Encoding.Unicode.CodePage, WslDistro.ImportInPlaceInvocation("D", "v").Encoding.CodePage);

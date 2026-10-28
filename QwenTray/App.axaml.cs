@@ -22,7 +22,7 @@ public partial class App : Application
     private Settings _settings = null!;
     private SettingsStore _settingsStore = null!;
     private RegistryAutostartService _autostart = null!;
-    private WslDistroProvisioner _provisioner = null!;
+    private DaemonLauncher _launcher = null!;
     private IProcessManager _processes = null!;
     private INavigationProvider _navigation = null!;
     private IUpdateService _updates = null!;
@@ -56,7 +56,7 @@ public partial class App : Application
         _logger = services.GetRequiredService<ILogger<App>>();
         _autostart = services.GetRequiredService<RegistryAutostartService>();
         _supervisor = services.GetRequiredService<DaemonSupervisor>();
-        _provisioner = services.GetRequiredService<WslDistroProvisioner>();
+        _launcher = services.GetRequiredService<DaemonLauncher>();
         _processes = services.GetRequiredService<IProcessManager>();
         _navigation = services.GetRequiredService<INavigationProvider>();
         _updates = services.GetRequiredService<IUpdateService>();
@@ -93,7 +93,7 @@ public partial class App : Application
             _settings.ResolveActiveProfile().Name,
             _settings.HealthUri,
             pollSeconds);
-        _ = StartDaemonOnStartupAsync();
+        _ = _launcher.LaunchAsync(CancellationToken.None);
 
         if (_settings.CheckForUpdates)
         {
@@ -141,19 +141,6 @@ public partial class App : Application
         {
             _logger.LogWarning(exception, "The update check failed.");
         }
-    }
-
-    // Launching into a distro that was never set up would spawn a daemon that immediately crashes and
-    // back off-restarts, so the tray stays put until the Linux environment exists.
-    private async Task StartDaemonOnStartupAsync()
-    {
-        if (!await _provisioner.IsConfiguredAsync(_settings.WslDistroName, CancellationToken.None))
-        {
-            _logger.LogInformation("Daemon not started on launch. The \"{Distro}\" Linux environment is not set up.", _settings.WslDistroName);
-            return;
-        }
-
-        await _supervisor.StartAsync();
     }
 
     private async void OnStart(object? sender, EventArgs e)

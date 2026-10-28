@@ -110,6 +110,7 @@ internal static class Program
         services.AddSingleton<RegistryAutostartService>();
         services.AddSingleton<SystemdUserService>();
         services.AddSingleton<DaemonSupervisor>();
+        services.AddSingleton<DaemonLauncher>();
         services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();
         services.AddSingleton<IFirewallRuleService, FirewallRuleService>();
 

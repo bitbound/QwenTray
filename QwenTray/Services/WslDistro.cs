@@ -22,6 +22,12 @@ public sealed record WslCommandResult(int ExitCode, string Output)
 public interface IWslDistro
 {
     Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Whether the distro is booted right now. Asking costs nothing, unlike every script call, which
+    /// boots a stopped distro on the way to answering.
+    /// </summary>
+    Task<bool> DistroIsRunningAsync(string distro, CancellationToken cancellationToken);
     Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken, TimeSpan? timeout = null);
     Task<WslCommandResult> RunScriptWithInputAsync(string distro, string user, string script, string input, CancellationToken cancellationToken, TimeSpan? timeout = null);
     Task<WslCommandResult> RunRootScriptAsync(string distro, string script, CancellationToken cancellationToken, TimeSpan? timeout = null);
@@ -107,6 +113,12 @@ public sealed class WslDistro : IWslDistro
         return result.Succeeded && ParseDistroNames(result.Output).Contains(distro, StringComparer.OrdinalIgnoreCase);
     }
 
+    public async Task<bool> DistroIsRunningAsync(string distro, CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(ListRunningDistrosInvocation(), input: null, cancellationToken);
+        return result.Succeeded && ParseDistroNames(result.Output).Contains(distro, StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Runs a shell script as <paramref name="user"/> inside the distro. <paramref name="timeout"/> is
     /// only for a step that legitimately takes longer than <see cref="CommandTimeout"/>, such as an
@@ -141,6 +153,14 @@ public sealed class WslDistro : IWslDistro
     /// <summary>A wsl.exe subcommand. wsl.exe writes its own output as UTF-16LE.</summary>
     internal static WslInvocation ListDistrosInvocation()
         => new(BuildArguments(["--list", "--quiet"]), WslOutputEncoding, CommandTimeout);
+
+    /// <summary>
+    /// The running distros by name. <c>--list</c> is a read of what the service already knows, so unlike
+    /// a command run inside the distro this boots nothing, which is what makes it the question to ask
+    /// first when a stopped distro has to stay stopped.
+    /// </summary>
+    internal static WslInvocation ListRunningDistrosInvocation()
+        => new(BuildArguments(["--list", "--running", "--quiet"]), WslOutputEncoding, CommandTimeout);
 
     internal static WslInvocation InstallDistroInvocation(string distro)
         => new(BuildArguments(["--install", SourceDistro, "--name", distro, "--no-launch", "--web-download"]), WslOutputEncoding, LongCommandTimeout);
