@@ -318,7 +318,7 @@ public sealed class DistroBackupServiceTests
 
         return new(
             wsl, fileSystem, new BackupBundle(fileSystem), new WslDistroLocation(registry),
-            new SettingsStore(fileSystem), settings ?? new Settings { WslDistroName = "QwenTray" }, provisioner,
+            new SettingsStore(fileSystem, fileSystem), settings ?? new Settings { WslDistroName = "QwenTray" }, provisioner,
             new RegistryAutostartService(registry),
             new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)),
             NullLogger<DistroBackupService>.Instance);

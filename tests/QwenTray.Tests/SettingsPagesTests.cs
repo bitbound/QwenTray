@@ -25,7 +25,7 @@ internal sealed class SettingsPages
         var fileSystem = new FakeFileSystem();
         var wsl = new FakeWslDistro();
         Wsl = wsl;
-        var store = new SettingsStore(fileSystem);
+        var store = new SettingsStore(fileSystem, fileSystem);
         var registry = new FakeRegistry();
         var autostart = new RegistryAutostartService(registry);
         var provisioner = new WslDistroProvisioner(wsl, fileSystem, null!, NullLogger<WslDistroProvisioner>.Instance);

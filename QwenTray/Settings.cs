@@ -243,7 +243,7 @@ public sealed class Settings
     }
 }
 
-public sealed class SettingsStore(IFileSystem fileSystem)
+public sealed class SettingsStore(IFileSystem fileSystem, IFileAccessPermissions fileAccessPermissions)
 {
     public static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "qwentray");
     public static string FilePath => Path.Combine(DirectoryPath, "settings.json");
@@ -321,20 +321,20 @@ public sealed class SettingsStore(IFileSystem fileSystem)
         }
     }
 
-    // The file-system abstraction has no ACL member, so this single write stays on the BCL. Losing it
-    // would leave settings.json readable by other accounts on the machine.
-    private static void RestrictToCurrentUser()
+    // Losing this would leave the file readable by other accounts on the machine.
+    private void RestrictToCurrentUser()
     {
         if (!OperatingSystem.IsWindows()) return;
 
-        var security = new System.Security.AccessControl.FileSecurity();
-        var identity = System.Security.Principal.WindowsIdentity.GetCurrent().User;
-        if (identity is null) return;
-
-        security.SetOwner(identity);
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(identity, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
-        new System.IO.FileInfo(FilePath).SetAccessControl(security);
+        // The owner is left alone. The file was just created by the account that owns it, and no
+        // well-known SID stands for that account.
+        fileAccessPermissions.Set(
+            FilePath,
+            includeCurrentUser: true,
+            isProtected: true,
+            preserveInheritance: false,
+            owner: null,
+            allowedSids: []);
     }
 }
 
