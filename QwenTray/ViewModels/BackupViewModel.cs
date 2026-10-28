@@ -92,8 +92,13 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         OnPropertyChanged(nameof(CanArchiveConfig));
     }
 
-    protected override Task OnInitializeAsync()
+    protected override async Task OnInitializeAsync()
     {
+        // Export gates on the distro existing, and that answer only comes from the Environment page's
+        // probe. A session that opens this page first never runs it, which left Export disabled for the
+        // rest of the session. A probe already made is not repeated, so a revisit costs nothing.
+        if (!_environment.HasCheckedDistro) await _environment.RefreshEnvironmentAsync();
+
         // A typed path survives a revisit, while an emptied field gets a fresh name in the stored folder.
         if (string.IsNullOrWhiteSpace(BundlePath))
         {
@@ -105,8 +110,6 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
         {
             ConfigArchivePath = QwenConfigArchiveService.DefaultArchivePath(_settings.ConfigArchiveDirectory);
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>

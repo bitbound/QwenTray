@@ -43,9 +43,12 @@ internal sealed class FakeWslDistro : IWslDistro
     /// </summary>
     public bool ScriptTimedOut { get; set; }
 
+    /// <summary>Makes the listing answer the way a distro that was never registered would.</summary>
+    public bool Exists { get; set; } = true;
+
     public int UnregisterExitCode { get; set; }
 
-    public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(true);
+    public Task<bool> DistroExistsAsync(string distro, CancellationToken cancellationToken) => Task.FromResult(Exists);
 
     public async Task<WslCommandResult> RunScriptAsync(string distro, string user, string script, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {

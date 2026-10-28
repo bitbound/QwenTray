@@ -193,10 +193,14 @@ public sealed partial class EnvironmentViewModel : ViewModelBase<EnvironmentView
         return Task.CompletedTask;
     }
 
-    private async Task RefreshEnvironmentAsync()
+    /// <summary>
+    /// Probes the distro, which is the answer a page that gates a command on its existence needs. Returns
+    /// without probing while a command holds the distro, because the probe runs inside it and would boot
+    /// a held one. The Backup page re-initializes this one once its command releases the hold, so nothing
+    /// stays stale.
+    /// </summary>
+    public async Task RefreshEnvironmentAsync()
     {
-        // Opening the page probes inside the distro, which would boot it beside a held one. The Backup
-        // page re-initializes this one once its command releases the hold, so nothing stays stale.
         if (_hold.IsHeld) return;
 
         await RefreshDistroAsync();
