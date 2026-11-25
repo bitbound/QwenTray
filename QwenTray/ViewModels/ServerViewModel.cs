@@ -17,6 +17,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
     private readonly Settings _settings;
     private readonly DaemonSupervisor _supervisor;
     private readonly WslDistroProvisioner _provisioner;
+    private readonly DaemonCertificateService _certificates;
     private readonly IFirewallRuleService _firewall;
     private readonly IDistroHold _hold;
     private readonly IdentityViewModel _identity;
@@ -60,6 +61,32 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
 
     [ObservableProperty]
     private string _tlsKeyPath = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditManualTlsPaths))]
+    private bool _tlsAutoGenerate;
+
+    [ObservableProperty]
+    private string _tlsSans = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTlsRootLocation))]
+    private string _tlsRootCertificatePath = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTlsRootLocation))]
+    private string _tlsRootCertificateSharePath = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanGenerateCertificate))]
+    private bool _isGeneratingCertificate;
+
+    /// <summary>The two manual path fields belong to the operator only while the app is not generating the certificate.</summary>
+    public bool CanEditManualTlsPaths => !TlsAutoGenerate;
+
+    public bool CanGenerateCertificate => !IsGeneratingCertificate && !_hold.IsHeld;
+
+    public bool HasTlsRootLocation => TlsAutoGenerate && TlsRootCertificatePath.Length > 0;
 
     [ObservableProperty]
     private bool _enableSessionShell;
@@ -118,6 +145,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         Settings settings,
         DaemonSupervisor supervisor,
         WslDistroProvisioner provisioner,
+        DaemonCertificateService certificates,
         IFirewallRuleService firewall,
         IDistroHold hold,
         IdentityViewModel identity,
@@ -128,6 +156,7 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         _settings = settings;
         _supervisor = supervisor;
         _provisioner = provisioner;
+        _certificates = certificates;
         _firewall = firewall;
         _hold = hold;
         _identity = identity;
@@ -140,14 +169,23 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         // A backup holds the distro from outside it, so the Qwen commands have to wait for it.
         _hold.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(IDistroHold.IsHeld)) OnPropertyChanged(nameof(CanCheckQwen));
+            if (e.PropertyName == nameof(IDistroHold.IsHeld))
+            {
+                OnPropertyChanged(nameof(CanCheckQwen));
+                OnPropertyChanged(nameof(CanGenerateCertificate));
+            }
         };
 
         // The executable path belongs to the active profile, so following the selection keeps the field
-        // honest even when the user never leaves the Identity page.
+        // honest even when the user never leaves the Identity page. The certificate material lives under
+        // the same profile's home, so the root location follows the selection for the same reason.
         _identity.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(IdentityViewModel.SelectedProfile)) ReloadQwenExecutable();
+            if (e.PropertyName == nameof(IdentityViewModel.SelectedProfile))
+            {
+                ReloadQwenExecutable();
+                RefreshTlsRootLocation();
+            }
         };
 
         // The shared save reads this page's fields even when the user never opened it, so seed them from
@@ -176,6 +214,9 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         AllowedOrigins = string.Join(Environment.NewLine, _settings.AllowedOrigins);
         TlsCertPath = _settings.TlsCertPath;
         TlsKeyPath = _settings.TlsKeyPath;
+        TlsAutoGenerate = _settings.TlsAutoGenerate;
+        TlsSans = string.Join(Environment.NewLine, _settings.TlsSubjectAltNames);
+        RefreshTlsRootLocation();
         EnableSessionShell = _settings.EnableSessionShell;
         ServeWeb = _settings.ServeWeb;
         LocalControl = _settings.LocalControl;
@@ -203,6 +244,65 @@ public sealed partial class ServerViewModel : ViewModelBase<ServerView>
         var qwen = QwenExecutable.Trim();
         if (qwen.Length > 0) profile.QwenExecutable = qwen;
     }
+
+    /// <summary>
+    /// Shows where the generated root lives, in both forms that matter for copying it to another device:
+    /// the path inside the distro and the share path Windows can open. A device that is not given the root
+    /// still shows its own warning, because the tray pins the root for itself only.
+    /// </summary>
+    private void RefreshTlsRootLocation()
+    {
+        var profile = _identity.SelectedProfile ?? _settings.ResolveActiveProfile();
+        var linuxPath = DaemonCertificateService.CaCertificatePath(profile);
+        TlsRootCertificatePath = linuxPath;
+        TlsRootCertificateSharePath = DaemonSupervisor.ToUncPath(_settings.WslDistroName, linuxPath);
+    }
+
+    /// <summary>Puts the generated material's paths into the fields, which is what a generated save does to the page.</summary>
+    internal void ApplyGeneratedTlsPaths(string certificatePath, string keyPath)
+    {
+        TlsCertPath = certificatePath;
+        TlsKeyPath = keyPath;
+    }
+
+    /// <summary>
+    /// Issues the certificate without waiting for a save, which is what makes a first attempt answer here
+    /// rather than in the daemon log after a restart. A save does the same thing and refuses to write
+    /// settings when this fails.
+    /// </summary>
+    [RelayCommand]
+    private async Task GenerateCertificateAsync()
+    {
+        IsGeneratingCertificate = true;
+        try
+        {
+            CommitProfileEdits();
+            var profile = _identity.SelectedProfile ?? _settings.ResolveActiveProfile();
+            var result = await _certificates.EnsureAsync(_settings.WslDistroName, profile, SplitSansLines(TlsSans), CancellationToken.None);
+            if (!result.Succeeded)
+            {
+                _snackbars.Show($"The certificate was not generated: {result.Failure}", SnackbarKind.Error);
+                return;
+            }
+
+            ApplyGeneratedTlsPaths(DaemonCertificateService.ServerCertificatePath(profile), DaemonCertificateService.ServerKeyPath(profile));
+            _snackbars.Show(
+                result.WasGenerated ? "Issued a new daemon certificate for the listed names." : "The daemon certificate already carries the listed names.",
+                SnackbarKind.Success);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Generating the daemon certificate failed.");
+            _snackbars.Show($"Generating the certificate failed: {ex.Message}", SnackbarKind.Error);
+        }
+        finally
+        {
+            IsGeneratingCertificate = false;
+        }
+    }
+
+    internal static string[] SplitSansLines(string? text) =>
+        (text ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     [RelayCommand]
     private async Task CheckQwenUpdateAsync()

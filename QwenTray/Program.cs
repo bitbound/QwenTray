@@ -109,6 +109,8 @@ internal static class Program
         services.AddSingleton<DevToolInstaller>();
         services.AddSingleton<RegistryAutostartService>();
         services.AddSingleton<SystemdUserService>();
+        services.AddSingleton<DaemonCertificateTrustService>();
+        services.AddSingleton<DaemonCertificateService>();
         services.AddSingleton<DaemonSupervisor>();
         services.AddSingleton<DaemonLauncher>();
         services.AddSingleton<ICertificateTrustService, BitboundCertificateTrustService>();

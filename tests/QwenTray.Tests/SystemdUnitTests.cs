@@ -370,7 +370,9 @@ public sealed class DaemonOutlivesTrayTests
     public async Task StartingHandsTheDaemonToSystemdAsTheProfileUser()
     {
         var wsl = new FakeWslDistro();
-        var settings = new Settings { Profiles = [new IdentityProfile { Id = "d", Name = "D", LinuxUser = "dev" }], ActiveProfileId = "d" };
+        // The default port belongs to a daemon that may be serving this very machine, and an answer
+        // there would move the supervisor to the adopt path rather than the start path under test.
+        var settings = new Settings { Port = UnusedPort(), Profiles = [new IdentityProfile { Id = "d", Name = "D", LinuxUser = "dev" }], ActiveProfileId = "d" };
         var supervisor = new DaemonSupervisor(settings, wsl, new SystemdUserService(wsl));
 
         await supervisor.StartAsync();

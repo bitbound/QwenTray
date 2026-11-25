@@ -23,15 +23,17 @@ internal sealed class SettingsPages
         Settings.ActiveProfileId = Settings.ResolveActiveProfile().Id;
 
         var fileSystem = new FakeFileSystem();
+        FileSystem = fileSystem;
         var wsl = new FakeWslDistro();
         Wsl = wsl;
         var store = new SettingsStore(fileSystem, fileSystem);
         var registry = new FakeRegistry();
         var autostart = new RegistryAutostartService(registry);
         var provisioner = new WslDistroProvisioner(wsl, fileSystem, null!, NullLogger<WslDistroProvisioner>.Instance);
+        Certificates = new DaemonCertificateService(wsl, new DaemonCertificateTrustService(wsl));
         var supervisor = new DaemonSupervisor(Settings, wsl, new SystemdUserService(wsl));
 
-        Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, NullLogger<SettingsSaveViewModel>.Instance);
+        Save = new SettingsSaveViewModel(_provider, Settings, store, supervisor, autostart, Certificates, NullLogger<SettingsSaveViewModel>.Instance);
         Hold = new DistroHold();
         var distroBackup = new DistroBackupService(wsl, fileSystem, new BackupBundle(fileSystem), new WslDistroLocation(registry), store, Settings, provisioner, autostart, new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)), NullLogger<DistroBackupService>.Instance);
         Environment = new EnvironmentViewModel(
@@ -49,7 +51,7 @@ internal sealed class SettingsPages
                 NullLogger<QwenConfigArchiveService>.Instance),
             Hold, Environment, Save, Snackbars, null!, NullLogger<BackupViewModel>.Instance);
         Firewall = new FakeFirewallRules();
-        Server = new ServerViewModel(Settings, supervisor, provisioner, Firewall, Hold, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
+        Server = new ServerViewModel(Settings, supervisor, provisioner, Certificates, Firewall, Hold, Identity, Save, Snackbars, NullLogger<ServerViewModel>.Instance);
         Page = new SettingsViewModel(Settings, autostart, null!, null!, supervisor, null!, Snackbars, Save, NullLogger<SettingsViewModel>.Instance);
 
         _provider.Environment = Environment;
@@ -68,6 +70,12 @@ internal sealed class SettingsPages
 
     /// <summary>The distro double behind every page, so a test can answer as an absent distro would.</summary>
     public FakeWslDistro Wsl { get; }
+
+    /// <summary>The real certificate service, running over the distro double.</summary>
+    public DaemonCertificateService Certificates { get; }
+
+    /// <summary>The file double behind the settings store, so a test can see whether settings.json was written.</summary>
+    public FakeFileSystem FileSystem { get; }
 
     public EnvironmentViewModel Environment { get; }
 
