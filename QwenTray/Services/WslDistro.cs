@@ -181,12 +181,28 @@ public sealed class WslDistro : IWslDistro
         => new(BuildArguments(BuildScriptCommand(distro, user, script)), CommandOutputEncoding, timeout ?? CommandTimeout);
 
     /// <summary>
-    /// Builds a command that runs <paramref name="script"/> through bash. The <c>-e</c> flag passes
-    /// the arguments verbatim; <c>--</c> re-joins them and runs them through the default shell, which
-    /// expands <c>$</c> and backticks inside the values.
+    /// Builds a command that runs <paramref name="script"/> through bash. The <c>-e</c> flag passes the
+    /// arguments verbatim, so nothing wsl.exe knows about re-reads them, and <c>-lc</c> makes bash a login
+    /// shell so the profile sets the environment the script runs with. The script travels as its own
+    /// argument and a child shell is exec-ed to run it, which is what keeps the reported exit code the
+    /// script's own.
     /// </summary>
     internal static IReadOnlyList<string> BuildScriptCommand(string distro, string user, string script)
-        => ["-d", distro, "-u", user, "-e", UnixProgram, "-lc", script];
+        => ["-d", distro, "-u", user, "-e", UnixProgram, "-lc", LoginShellHandsOff, script];
+
+    /// <summary>
+    /// wsl.exe puts no <c>SHLVL</c> in a distro process's environment, so bash starts at 1 and, being a
+    /// login shell, runs <c>~/.bash_logout</c> on the way out. Ubuntu's copy of that file runs
+    /// <c>clear_console -q</c> whenever <c>SHLVL</c> is 1, and against a redirected stdout it fails. A
+    /// shell normally keeps the status the script ended with, so this is invisible until a script turns
+    /// errexit on, after which the failing logout command aborts the shell and becomes the reported exit
+    /// code: a script that printed its success marker and called <c>exit 0</c> was answered as failed.
+    /// Exec-ing the child replaces the login shell instead of exiting it, so the file is never reached,
+    /// while the profile has already run and its environment is inherited. Measured in the distro:
+    /// <c>set -e &amp;&amp; if true; then echo m; exit 0; fi</c> answered 1 before and 0 after, and
+    /// <c>false</c> still answers 1.
+    /// </summary>
+    internal const string LoginShellHandsOff = "exec /bin/bash -c \"$0\"";
 
     /// <summary>
     /// The daemon's command line as a shell script. Every argument is single-quoted, so nothing the

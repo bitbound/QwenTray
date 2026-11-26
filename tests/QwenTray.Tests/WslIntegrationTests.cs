@@ -11,7 +11,19 @@ public sealed class WslCommandTests
     [Fact]
     public void ScriptRunsThroughBashWithoutTheDefaultShell()
     {
-        Assert.Equal(["-d", "QwenTray", "-u", "qwen", "-e", "/bin/bash", "-lc", "echo hi"], WslDistro.BuildScriptCommand("QwenTray", "qwen", "echo hi"));
+        Assert.Equal(
+            ["-d", "QwenTray", "-u", "qwen", "-e", "/bin/bash", "-lc", WslDistro.LoginShellHandsOff, "echo hi"],
+            WslDistro.BuildScriptCommand("QwenTray", "qwen", "echo hi"));
+    }
+
+    [Fact]
+    public void TheLoginShellIsReplacedRatherThanExitedSoItsLogoutFileCannotSpeakForTheScript()
+    {
+        // Ubuntu's ~/.bash_logout runs clear_console -q at SHLVL 1, which wsl.exe always leaves at 1, and
+        // with errexit on that failing command replaced a successful script's exit code. Exec-ing the child
+        // means the login shell never exits, so the file never runs.
+        Assert.StartsWith("exec ", WslDistro.LoginShellHandsOff, StringComparison.Ordinal);
+        Assert.Contains("-c \"$0\"", WslDistro.LoginShellHandsOff, StringComparison.Ordinal);
     }
 
     [Fact]
