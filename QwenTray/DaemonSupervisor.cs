@@ -1,3 +1,4 @@
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -15,8 +16,9 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     private readonly Settings _settings;
     private readonly IWslDistro _wsl;
     private readonly SystemdUserService _unit;
+    private readonly DaemonCertificateTrustService? _tlsTrust;
     private readonly ILogger<DaemonSupervisor> _logger;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(2) };
+    private readonly HttpClient _http;
     private readonly DaemonStateMachine _machine = new();
     private readonly SemaphoreSlim _localControlGate = new(1, 1);
     private int _healthMisses;
@@ -34,12 +36,58 @@ public sealed class DaemonSupervisor : IAsyncDisposable
     private int _holdCount;
     private string? _holdReason;
 
-    public DaemonSupervisor(Settings settings, IWslDistro wsl, SystemdUserService unit, ILogger<DaemonSupervisor>? logger = null)
+    public DaemonSupervisor(Settings settings, IWslDistro wsl, SystemdUserService unit, DaemonCertificateTrustService? tlsTrust = null, ILogger<DaemonSupervisor>? logger = null)
     {
         _settings = settings;
         _wsl = wsl;
         _unit = unit;
+        _tlsTrust = tlsTrust;
         _logger = logger ?? NullLogger<DaemonSupervisor>.Instance;
+        if (tlsTrust is null)
+        {
+            _http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        }
+        else
+        {
+            // The generated root lives inside the distro rather than in a Windows store, so the system
+            // trust calls a healthy https daemon an untrusted chain. The pinned check inside the callback
+            // is what keeps the health probe from reading a serving daemon as dead, and it defers to the
+            // system trust for any certificate the generated root does not stand behind.
+            var handler = new SocketsHttpHandler();
+            handler.SslOptions.RemoteCertificateValidationCallback = ValidateDaemonCertificate;
+            _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(2) };
+        }
+    }
+
+    private bool ValidateDaemonCertificate(object? sender, X509Certificate? certificate, X509Chain? chain, System.Net.Security.SslPolicyErrors sslPolicyErrors)
+    {
+        if (sslPolicyErrors is System.Net.Security.SslPolicyErrors.None)
+        {
+            return true;
+        }
+
+        if (certificate is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var leaf = X509CertificateLoader.LoadCertificate(certificate.Export(X509ContentType.Cert));
+            // The tray only ever dials the loopback address of its own daemon, so that is the name the leaf
+            // has to cover, which is why 127.0.0.1 belongs on every generated certificate.
+            // No readable generated root means this certificate is not the tray's own material, and an
+            // erroring chain that the system trust also rejects is rejected here too.
+            var verdict = _tlsTrust?.ValidateServerCertificate(_settings.WslDistroName, _settings.ResolveActiveProfile(), leaf, _settings.LoopbackUri.IdnHost);
+            return verdict ?? false;
+        }
+        catch (Exception exception) when (exception is System.Security.Cryptography.CryptographicException or ArgumentException)
+        {
+            // An unreadable certificate is a failed check, and a throw out of this callback would fail
+            // the handshake without ever reaching the log.
+            _logger.LogWarning(exception, "The daemon's TLS certificate could not be read for validation.");
+            return false;
+        }
     }
 
     public DaemonState State => _machine.State;
@@ -595,6 +643,11 @@ public sealed class DaemonSupervisor : IAsyncDisposable
         if (settings.LanProxy && settings.LanProxyPort == settings.Port) yield return "The LAN exposure port matches the daemon's port, so the forwarder could never bind it.";
         if (settings.LanProxy && !IsLoopbackHost(settings.Host)) yield return "The LAN exposure expects the daemon address to be 127.0.0.1. A wildcard bind already exposes the daemon, so the forwarder would add nothing.";
         if (settings.RequireAuth && string.IsNullOrWhiteSpace(settings.Token)) yield return "Require auth is set without a token; the daemon only fails fast on a loopback bind.";
+        // A wildcard or explicit network bind is the direct-serve case: no forwarder, the daemon answers
+        // the network itself. It has to carry a token, and the names dialed have to be on the leaf, so
+        // both are pointed at here rather than left for a client to discover as a failure.
+        if (!IsLoopbackHost(settings.Host) && string.IsNullOrWhiteSpace(settings.Token)) yield return $"The daemon binds {settings.Host}, which is reachable from the network, but no token is set; the daemon refuses a non-loopback bind without one.";
+        if (!IsLoopbackHost(settings.Host) && !string.IsNullOrWhiteSpace(settings.TlsCertPath) && settings.TlsSubjectAltNames.Length == 0) yield return "The daemon serves https on a network address with an empty certificate name list; the leaf only covers loopback, so a client dialing the network address gets a name mismatch.";
         var hasCert = !string.IsNullOrWhiteSpace(settings.TlsCertPath);
         var hasKey = !string.IsNullOrWhiteSpace(settings.TlsKeyPath);
         if (hasCert != hasKey) yield return "--tls-cert and --tls-key must both be set or both empty.";

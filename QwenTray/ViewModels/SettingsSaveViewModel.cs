@@ -15,6 +15,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
     private readonly SettingsStore _settingsStore;
     private readonly DaemonSupervisor _supervisor;
     private readonly RegistryAutostartService _autostart;
+    private readonly DaemonCertificateService _certificates;
     private readonly ILogger<SettingsSaveViewModel> _logger;
 
     [ObservableProperty]
@@ -44,6 +45,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         SettingsStore settingsStore,
         DaemonSupervisor supervisor,
         RegistryAutostartService autostart,
+        DaemonCertificateService certificates,
         ILogger<SettingsSaveViewModel> logger)
     {
         _services = services;
@@ -51,6 +53,7 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         _settingsStore = settingsStore;
         _supervisor = supervisor;
         _autostart = autostart;
+        _certificates = certificates;
         _logger = logger;
     }
 
@@ -80,6 +83,24 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         {
             SaveError = error;
             return;
+        }
+
+        // Generation is part of the save rather than a step the daemon discovers on its own. A leaf that
+        // never made it to disk would leave the systemd unit refusing to boot the daemon, which is far
+        // harder to diagnose than a failed save that says so here and writes nothing.
+        if (_settings.TlsAutoGenerate)
+        {
+            var profile = _settings.ResolveActiveProfile();
+            var certificate = await _certificates.EnsureAsync(_settings.WslDistroName, profile, _settings.TlsSubjectAltNames, CancellationToken.None);
+            if (!certificate.Succeeded)
+            {
+                SaveError = $"The daemon certificate was not generated, so nothing was saved. {certificate.Failure}";
+                return;
+            }
+
+            _settings.TlsCertPath = DaemonCertificateService.ServerCertificatePath(profile);
+            _settings.TlsKeyPath = DaemonCertificateService.ServerKeyPath(profile);
+            _services.GetRequiredService<ServerViewModel>().ApplyGeneratedTlsPaths(_settings.TlsCertPath, _settings.TlsKeyPath);
         }
 
         var settingsPage = _services.GetRequiredService<SettingsViewModel>();
@@ -241,6 +262,20 @@ public sealed partial class SettingsSaveViewModel : ObservableObject
         _settings.AllowedOrigins = SplitLines(server.AllowedOrigins);
         _settings.TlsCertPath = server.TlsCertPath.Trim();
         _settings.TlsKeyPath = server.TlsKeyPath.Trim();
+        var tlsSans = ServerViewModel.SplitSansLines(server.TlsSans);
+        // Only the generated leaf is built from this list, so only then is an unusable entry a problem
+        // worth refusing the save for. It is checked before the distro is asked for a certificate.
+        if (server.TlsAutoGenerate)
+        {
+            var badSan = tlsSans.FirstOrDefault(name => !DaemonCertificateService.IsValidSubjectAlternativeName(name));
+            if (badSan is not null)
+            {
+                return $"\"{badSan}\" is neither a DNS name nor an IP address. The certificate name list holds the names and addresses clients dial, one per line.";
+            }
+        }
+
+        _settings.TlsAutoGenerate = server.TlsAutoGenerate;
+        _settings.TlsSubjectAltNames = tlsSans;
         _settings.EnableSessionShell = server.EnableSessionShell;
         _settings.ServeWeb = server.ServeWeb;
         _settings.LocalControl = server.LocalControl;

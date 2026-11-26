@@ -131,6 +131,20 @@ public sealed class Settings
     public string[] AllowedOrigins { get; set; } = [];
     public string TlsCertPath { get; set; } = "";
     public string TlsKeyPath { get; set; } = "";
+
+    /// <summary>
+    /// Whether QwenTray provisions the daemon's certificate itself. On, a save generates a local CA and a
+    /// leaf under it inside the distro, under the active profile's home, and the two paths above become
+    /// the generated ones.
+    /// </summary>
+    public bool TlsAutoGenerate { get; set; }
+
+    /// <summary>
+    /// The names and addresses clients dial the daemon at, each becoming a subject alternative name on the
+    /// generated leaf. 127.0.0.1 and localhost are on every leaf whether listed or not, because the tray's
+    /// health check dials loopback over https and an untrusted name there reads as a dead daemon.
+    /// </summary>
+    public string[] TlsSubjectAltNames { get; set; } = [];
     public int MaxSessions { get; set; } = 32;
     public int MaxConnections { get; set; } = 256;
     public int EventRingSize { get; set; } = 8000;
@@ -234,6 +248,8 @@ public sealed class Settings
         AllowedOrigins = other.AllowedOrigins;
         TlsCertPath = other.TlsCertPath;
         TlsKeyPath = other.TlsKeyPath;
+        TlsAutoGenerate = other.TlsAutoGenerate;
+        TlsSubjectAltNames = other.TlsSubjectAltNames;
         MaxSessions = other.MaxSessions;
         MaxConnections = other.MaxConnections;
         EventRingSize = other.EventRingSize;

@@ -81,7 +81,7 @@
           <StackPanel Spacing="10">
             <TextBlock Classes="h2" Text="Security" />
 
-            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="220,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
               <TextBlock Grid.Row="0" Classes="field" Text="Bearer token" />
               <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
                 <Grid ColumnDefinitions="*,Auto">
@@ -121,14 +121,50 @@
               </StackPanel>
 
               <TextBlock Grid.Row="3" Classes="field" Text="TLS cert path" Margin="0,10,0,0" />
-              <TextBox Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Text="{Binding TlsCertPath}" />
+              <TextBox Grid.Row="3" Grid.Column="1" Margin="0,10,0,0"
+                       Text="{Binding TlsCertPath}"
+                       IsEnabled="{Binding CanEditManualTlsPaths}" />
 
               <TextBlock Grid.Row="4" Classes="field" Text="TLS key path" Margin="0,10,0,0" />
               <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
-                <TextBox Text="{Binding TlsKeyPath}" />
+                <TextBox Text="{Binding TlsKeyPath}" IsEnabled="{Binding CanEditManualTlsPaths}" />
                 <TextBlock Classes="caption"
                            TextWrapping="Wrap"
                            Text="Set both or neither. Enables https for the daemon and health check." />
+              </StackPanel>
+
+              <CheckBox Grid.Row="5" Grid.Column="1" Margin="0,10,0,0"
+                        Content="Generate the certificate inside the distro"
+                        IsChecked="{Binding TlsAutoGenerate}" />
+
+              <TextBlock Grid.Row="6" Classes="field" Text="Certificate names" Margin="0,10,0,0" />
+              <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,10,0,0" Spacing="4">
+                <TextBox Text="{Binding TlsSans}"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         MinHeight="52"
+                         IsEnabled="{Binding TlsAutoGenerate}" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="One DNS name or address per line: every address a phone or laptop dials, like the PC's LAN address. 127.0.0.1 and localhost are always included, because the tray health check dials loopback over https. Saving reissues the leaf whenever this list changes." />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Generate now"
+                            Classes="Primary VariantOutlined"
+                            Command="{Binding GenerateCertificateCommand}"
+                            IsEnabled="{Binding CanGenerateCertificate}"
+                            ToolTip.Tip="Issues the certificate without waiting for a save. Saving does the same and refuses to write the settings when the certificate cannot be produced." />
+                </StackPanel>
+              </StackPanel>
+
+              <TextBlock Grid.Row="7" Classes="field" Text="Root certificate" Margin="0,10,0,0"
+                         IsVisible="{Binding HasTlsRootLocation}" />
+              <StackPanel Grid.Row="7" Grid.Column="1" Margin="0,10,0,0" Spacing="4"
+                          IsVisible="{Binding HasTlsRootLocation}">
+                <TextBox Text="{Binding TlsRootCertificatePath}" IsReadOnly="True" />
+                <TextBox Text="{Binding TlsRootCertificateSharePath}" IsReadOnly="True" />
+                <TextBlock Classes="caption"
+                           TextWrapping="Wrap"
+                           Text="Copy this file to every device that dials the daemon and install it there as a trusted root, or the browser warns on each visit. The tray trusts it for its own health check without any install." />
               </StackPanel>
             </Grid>
           </StackPanel>
