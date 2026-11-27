@@ -23,6 +23,7 @@ public sealed class ConfigArchiveTests
             Archive,
             Manifest(),
             ["/home/qwen/.qwen/QWEN.md", "/home/qwen/.qwen/agents", "/home/qwen/.qwen/missing.md"],
+            "{}",
             CancellationToken.None);
 
         Assert.Equal(3, result.FilesWritten);
@@ -43,11 +44,40 @@ public sealed class ConfigArchiveTests
     }
 
     [Fact]
+    public async Task AnExportCarriesTheQwenTraySettingsOutsideTheDistroFileSet()
+    {
+        var fileSystem = ConfigFiles();
+        var archive = new QwenConfigArchive(fileSystem);
+        const string traySettings = """{"token":"bearer-from-this-machine"}""";
+
+        await archive.ExportAsync(
+            HostRoot,
+            Archive,
+            Manifest(),
+            ["/home/qwen/.qwen/QWEN.md"],
+            traySettings,
+            CancellationToken.None);
+
+        using var zip = new ZipArchive(
+            fileSystem.OpenFileStream(Archive, FileMode.Open, FileAccess.Read, FileShare.Read),
+            ZipArchiveMode.Read);
+        await using var trayEntry = zip.GetEntry(QwenConfigArchive.TraySettingsEntry)!.Open();
+        using var buffer = new MemoryStream();
+        await trayEntry.CopyToAsync(buffer, CancellationToken.None);
+
+        Assert.Equal(traySettings, Encoding.UTF8.GetString(buffer.ToArray()));
+
+        // The settings are not a distro path, so they stay out of the set a restore writes back.
+        var manifest = await archive.ReadManifestAsync(Archive, CancellationToken.None);
+        Assert.Equal(["/home/qwen/.qwen/QWEN.md"], manifest.Files);
+    }
+
+    [Fact]
     public async Task ARestoreWritesEveryFileBackToThePathRecordedForIt()
     {
         var fileSystem = ConfigFiles();
         var archive = new QwenConfigArchive(fileSystem);
-        await archive.ExportAsync(HostRoot, Archive, Manifest(), ["/home/qwen/.qwen"], CancellationToken.None);
+        await archive.ExportAsync(HostRoot, Archive, Manifest(), ["/home/qwen/.qwen"], "{}", CancellationToken.None);
 
         var result = await archive.RestoreAsync("/restored", Archive, CancellationToken.None);
 
@@ -68,7 +98,7 @@ public sealed class ConfigArchiveTests
         var archive = new QwenConfigArchive(fileSystem);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => archive.ExportAsync(HostRoot, Archive, Manifest(), ["/home/qwen/.qwen/QWEN.md"], CancellationToken.None));
+            () => archive.ExportAsync(HostRoot, Archive, Manifest(), ["/home/qwen/.qwen/QWEN.md"], "{}", CancellationToken.None));
 
         Assert.Equal(existing, await fileSystem.ReadAllBytesAsync(Archive));
     }
@@ -81,7 +111,7 @@ public sealed class ConfigArchiveTests
         var manifest = Manifest();
         manifest.SchemaVersion = ConfigArchiveManifest.CurrentSchemaVersion + 1;
 
-        await archive.ExportAsync(HostRoot, Archive, manifest, ["/home/qwen/.qwen/QWEN.md"], CancellationToken.None);
+        await archive.ExportAsync(HostRoot, Archive, manifest, ["/home/qwen/.qwen/QWEN.md"], "{}", CancellationToken.None);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => archive.ReadManifestAsync(Archive, CancellationToken.None));
@@ -96,7 +126,7 @@ public sealed class ConfigArchiveTests
         var manifest = Manifest();
         manifest.Type = "qwentray-bundle";
 
-        await archive.ExportAsync(HostRoot, Archive, manifest, ["/home/qwen/.qwen/QWEN.md"], CancellationToken.None);
+        await archive.ExportAsync(HostRoot, Archive, manifest, ["/home/qwen/.qwen/QWEN.md"], "{}", CancellationToken.None);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => archive.ReadManifestAsync(Archive, CancellationToken.None));

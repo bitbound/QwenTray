@@ -1,12 +1,14 @@
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using Bitbound.SystemAbstractions.FileSystem;
 
 namespace QwenTray.Services;
 
 /// <summary>
-/// What a configuration backup holds and where it came from. Every path is absolute and Linux, because
-/// the archive only ever reads and writes inside the distro.
+/// What a configuration backup holds and where it came from. Every path in <see cref="Files"/> is
+/// absolute and Linux, because those files are read out of the distro. This machine's QwenTray settings
+/// ride in the archive under a separate entry and are never one of these paths.
 /// </summary>
 public sealed record ConfigArchiveManifest
 {
@@ -38,11 +40,16 @@ public sealed record ConfigRestoreResult(int FilesWritten, string[] Missing, str
 /// </summary>
 public interface IQwenConfigArchive
 {
+    /// <summary>
+    /// Packs the distro files listed in <paramref name="paths"/> together with the QwenTray settings in
+    /// <paramref name="traySettingsJson"/>.
+    /// </summary>
     Task<ConfigExportResult> ExportAsync(
         string hostRoot,
         string archivePath,
         ConfigArchiveManifest manifest,
         IReadOnlyCollection<string> paths,
+        string traySettingsJson,
         CancellationToken cancellationToken);
 
     Task<ConfigArchiveManifest> ReadManifestAsync(string archivePath, CancellationToken cancellationToken);
@@ -56,6 +63,13 @@ public interface IQwenConfigArchive
 public sealed class QwenConfigArchive(IFileSystem fileSystem) : IQwenConfigArchive
 {
     public const string ManifestEntry = "manifest.json";
+
+    /// <summary>
+    /// The member holding the host QwenTray settings. It sits outside the <c>files</c> tree so it cannot
+    /// collide with a distro path, and a restore never writes it, because the manifest does not name it.
+    /// </summary>
+    public const string TraySettingsEntry = "qwentray-settings.json";
+
     private const string FilesPrefix = "files";
 
     /// <summary>
@@ -67,6 +81,7 @@ public sealed class QwenConfigArchive(IFileSystem fileSystem) : IQwenConfigArchi
         string archivePath,
         ConfigArchiveManifest manifest,
         IReadOnlyCollection<string> paths,
+        string traySettingsJson,
         CancellationToken cancellationToken)
     {
         if (fileSystem.FileExists(archivePath))
@@ -123,6 +138,8 @@ public sealed class QwenConfigArchive(IFileSystem fileSystem) : IQwenConfigArchi
             ManifestEntry,
             JsonSerializer.SerializeToUtf8Bytes(manifest, QwenTrayJsonContext.Default.ConfigArchiveManifest),
             cancellationToken);
+
+        await WriteBytesAsync(archive, TraySettingsEntry, Encoding.UTF8.GetBytes(traySettingsJson), cancellationToken);
 
         foreach (var path in files)
         {
