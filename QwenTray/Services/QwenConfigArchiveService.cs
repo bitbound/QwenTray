@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Bitbound.SystemAbstractions.FileSystem;
 using Microsoft.Extensions.Logging;
 using QwenTray.Updates;
@@ -5,8 +6,9 @@ using QwenTray.Updates;
 namespace QwenTray.Services;
 
 /// <summary>
-/// Backs up and restores the active profile's Qwen configuration from inside the distro. The Windows
-/// <c>%USERPROFILE%\.qwen</c> folder is never read or written.
+/// Backs up and restores the active profile's Qwen configuration from inside the distro, and carries
+/// this machine's QwenTray settings along in the same ZIP. The Windows <c>%USERPROFILE%\.qwen</c> folder
+/// is never read or written.
 /// </summary>
 public interface IQwenConfigArchiveService
 {
@@ -30,6 +32,7 @@ public interface IQwenConfigArchiveService
 /// Drives the archive over the distro share, so each command wakes the distro first.
 /// </summary>
 public sealed class QwenConfigArchiveService(
+    Settings settings,
     IQwenConfigArchive archive,
     IWslDistro wsl,
     AppInfo appInfo,
@@ -68,9 +71,17 @@ public sealed class QwenConfigArchiveService(
             LinuxUser = profile.LinuxUser,
         };
 
-        var result = await archive.ExportAsync(HostRoot(distro), archivePath, manifest, paths, cancellationToken);
+        // The settings file on disk is a DPAPI blob, so the archive carries the live object as plaintext
+        // the way a bundle does. A blob would not open on the machine this archive lands on.
+        var result = await archive.ExportAsync(
+            HostRoot(distro),
+            archivePath,
+            manifest,
+            paths,
+            JsonSerializer.Serialize(settings, QwenTrayJsonContext.Default.Settings),
+            cancellationToken);
         logger.LogInformation(
-            "Wrote {Count} configuration file(s) from {Distro} to {Archive}.",
+            "Wrote {Count} configuration file(s) and this machine's QwenTray settings from {Distro} to {Archive}.",
             result.FilesWritten,
             distro,
             result.ArchivePath);

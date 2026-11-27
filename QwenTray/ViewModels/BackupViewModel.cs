@@ -6,7 +6,8 @@ namespace QwenTray.ViewModels;
 
 /// <summary>
 /// The two backups. A WSL backup carries the whole distro plus this machine's settings as one bundle,
-/// and a configuration backup carries a ZIP of the files listed from the active profile's home.
+/// and a configuration backup carries a ZIP of the files listed from the active profile's home alongside
+/// this machine's QwenTray settings. A restore writes only the listed files back into the distro.
 /// </summary>
 public sealed partial class BackupViewModel : ViewModelBase<BackupView>
 {
@@ -275,7 +276,7 @@ public sealed partial class BackupViewModel : ViewModelBase<BackupView>
             var manifest = await _archive.ProbeAsync(archivePath, CancellationToken.None);
             var confirmed = await _confirm.ConfirmAsync(new ConfirmDialogRequest(
                 "Restore the configuration?",
-                $"The files in this archive are written into the \"{profile.Name}\" profile and replace any file at the same path.",
+                $"The files in this archive are written into the \"{profile.Name}\" profile and replace any file at the same path. The QwenTray settings the archive carries stay inside it, because only a bundle import applies those.",
                 "Restore",
                 $"Archive: {archivePath}. Written from {manifest.WslDistroName} as {manifest.LinuxUser} on {manifest.CreatedAtUtc.ToLocalTime():g}, holding {manifest.Files.Length} file(s)."));
             if (!confirmed) return;

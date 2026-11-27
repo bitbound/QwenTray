@@ -46,7 +46,7 @@ internal sealed class SettingsPages
         Backup = new BackupViewModel(
             Settings, supervisor, distroBackup,
             new QwenConfigArchiveService(
-                new QwenConfigArchive(fileSystem), wsl,
+                Settings, new QwenConfigArchive(fileSystem), wsl,
                 new AppInfo("QwenTray", "bitbound/QwenTray", new Version(1, 4, 0)),
                 NullLogger<QwenConfigArchiveService>.Instance),
             Hold, Environment, Save, Snackbars, null!, NullLogger<BackupViewModel>.Instance);
